@@ -100,6 +100,18 @@ local function kilometres_to_nautical_miles(km)
     return km / 1.852
 end
 
+local function is_number(value)
+    return type(value) == "number"
+end
+
+local function number_or_zero(value)
+    if is_number(value) then
+        return value
+    end
+
+    return 0
+end
+
 ------------------------------------------------------------
 -- DISTANCE AND HEADING
 ------------------------------------------------------------
@@ -518,12 +530,10 @@ local function get_total_fuel()
     local total_fuel = 0
 
     for tank = 0, 8 do
-        if xoof_fuel_tanks[tank] ~= nil then
-            total_fuel =
-                total_fuel
-                +
-                xoof_fuel_tanks[tank]
-        end
+        total_fuel =
+            total_fuel
+            +
+            number_or_zero(xoof_fuel_tanks[tank])
     end
 
     return total_fuel
@@ -531,12 +541,12 @@ end
 
 local function add_balanced_fuel()
     xoof_fuel_tanks[0] =
-        xoof_fuel_tanks[0]
+        number_or_zero(xoof_fuel_tanks[0])
         +
         FUEL_PER_TANK_KG
 
     xoof_fuel_tanks[1] =
-        xoof_fuel_tanks[1]
+        number_or_zero(xoof_fuel_tanks[1])
         +
         FUEL_PER_TANK_KG
 end
@@ -737,8 +747,8 @@ function xoof_draw()
             "Fuel: %.0f kg | "
             .. "Left: %.0f | Right: %.0f",
             get_total_fuel(),
-            xoof_fuel_tanks[0],
-            xoof_fuel_tanks[1]
+            number_or_zero(xoof_fuel_tanks[0]),
+            number_or_zero(xoof_fuel_tanks[1])
         )
     )
 
@@ -771,7 +781,9 @@ function xoof_draw()
         if airport ~= nil then
             local affordability
 
-            if get_total_fuel()
+            if not is_number(airport.required_fuel) then
+                affordability = "UNKNOWN"
+            elseif get_total_fuel()
                 >=
                 airport.required_fuel then
 
@@ -790,9 +802,9 @@ function xoof_draw()
                     .. "DEPOT 50 KG | %s",
                     index,
                     airport.icao,
-                    airport.distance_nm,
-                    airport.heading,
-                    airport.required_fuel,
+                    number_or_zero(airport.distance_nm),
+                    number_or_zero(airport.heading),
+                    number_or_zero(airport.required_fuel),
                     affordability
                 )
             )
