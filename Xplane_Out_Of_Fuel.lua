@@ -4,6 +4,11 @@
 
 local PLUGIN_NAME = "Xplane Out Of Fuel"
 
+-- The black key journey always begins at Manapouri / Te Anau Airport.
+-- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
+local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
+local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
+
 ------------------------------------------------------------
 -- GAME SETTINGS
 ------------------------------------------------------------
@@ -61,6 +66,7 @@ xoof_fuel_tanks = dataref_table(
 
 local has_been_airborne = false
 local current_landing_processed = false
+local campaign_started = false
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -610,32 +616,47 @@ end
 local function initialise_departure_airport()
     update_nearest_airport()
 
+    campaign_started = false
+    departure_airport = nil
+
     if nearest_airport == nil then
         set_status(
-            "No airport could be identified."
+            "Campaign start unavailable. Position the aircraft at "
+            .. CAMPAIGN_START_AIRPORT_ICAO
+            .. "."
         )
 
         return
     end
 
-    if nearest_airport_distance_km
-        >
-        MAX_AIRPORT_DISTANCE_KM then
+    if not is_number(nearest_airport_distance_km)
+        or nearest_airport_distance_km
+            > MAX_AIRPORT_DISTANCE_KM then
 
         set_status(
-            string.format(
-                "Nearest airport is %s, "
-                .. "but it is %.1f km away.",
-                nearest_airport,
-                nearest_airport_distance_km
-            )
+            "Campaign start unavailable. Position the aircraft at "
+            .. CAMPAIGN_START_AIRPORT_ICAO
+            .. "."
+        )
+
+        return
+    end
+
+    if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO then
+        set_status(
+            "Campaign begins at "
+            .. CAMPAIGN_START_AIRPORT_ICAO
+            .. " ("
+            .. CAMPAIGN_START_AIRPORT_NAME
+            .. ")."
         )
 
         return
     end
 
     departure_airport =
-        nearest_airport
+        CAMPAIGN_START_AIRPORT_ICAO
+    campaign_started = true
 
     set_status(
         string.format(
@@ -653,6 +674,12 @@ end
 ------------------------------------------------------------
 
 function xoof_update()
+    -- Do not award fuel or advance campaign state when X-Plane was loaded
+    -- away from the designated New Zealand starting airport.
+    if not campaign_started then
+        return
+    end
+
     local engine_is_running =
         xoof_engine_running[0] == 1
 
