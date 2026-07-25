@@ -2,7 +2,9 @@
 -- Prototype 0.3
 -- Airport-to-airport fuel system and next-hop suggestions
 
-local PLUGIN_NAME = "Xplane Out Of Fuel"
+local PLUGIN_NAME = "2030 - AI Apocalypse"
+local CURRENT_MISSION_STATUS =
+    "Current Status: Get the Prompt Key to Heathrow EGLL to be decrypted"
 
 -- The black key journey always begins at Manapouri / Te Anau Airport.
 -- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
@@ -1090,7 +1092,7 @@ end
 local function draw_display_background(starting_y)
     local panel_left = 24
     local panel_right = 850
-    local panel_bottom = starting_y - 195
+    local panel_bottom = starting_y - 220
     local panel_top = starting_y + 25
 
     set_display_color(DISPLAY_PANEL_COLOR)
@@ -1131,12 +1133,18 @@ function xoof_draw()
     draw_string_Helvetica_12(
         40,
         starting_y - 25,
-        status_message
+        CURRENT_MISSION_STATUS
     )
 
     draw_string_Helvetica_12(
         40,
         starting_y - 45,
+        status_message
+    )
+
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 65,
         string.format(
             "Fuel: %.0f kg | "
             .. "Left: %.0f | Right: %.0f",
@@ -1149,7 +1157,7 @@ function xoof_draw()
     if departure_airport ~= nil then
         draw_string_Helvetica_12(
             40,
-            starting_y - 65,
+            starting_y - 85,
             "Current airport: "
             .. departure_airport
         )
@@ -1157,7 +1165,7 @@ function xoof_draw()
 
     draw_string_Helvetica_18(
         40,
-        starting_y - 100,
+        starting_y - 115,
         "SUGGESTED NEXT HOPS"
     )
 
@@ -1168,7 +1176,7 @@ function xoof_draw()
         local line_y =
             starting_y
             -
-            100
+            115
             -
             (index * 25)
 
