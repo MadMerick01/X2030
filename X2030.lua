@@ -1,4 +1,4 @@
--- Xplane Out Of Fuel
+-- X2030
 -- Prototype 0.4
 -- Airport-to-airport fuel system and next-hop suggestions
 
@@ -15,13 +15,18 @@ local CURRENT_MISSION_STATUS =
 local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
 local CAMPAIGN_SAVE_VERSION = 1
-local CAMPAIGN_SAVE_PATH =
+local CAMPAIGN_PREFERENCES_DIRECTORY =
     SYSTEM_DIRECTORY
     .. "Output"
     .. DIRECTORY_SEPARATOR
     .. "preferences"
     .. DIRECTORY_SEPARATOR
-    .. "Xplane_Out_Of_Fuel_Campaign.txt"
+local CAMPAIGN_SAVE_PATH =
+    CAMPAIGN_PREFERENCES_DIRECTORY .. "X2030_Campaign.txt"
+-- Existing campaigns used this filename before the main script was renamed.
+-- It remains readable so upgrading does not discard a player's progress.
+local LEGACY_CAMPAIGN_SAVE_PATH =
+    CAMPAIGN_PREFERENCES_DIRECTORY .. "Xplane_Out_Of_Fuel_Campaign.txt"
 
 ------------------------------------------------------------
 -- GAME SETTINGS
@@ -115,7 +120,7 @@ local function set_status(message)
     status_message = message
 
     logMsg(
-        "[Xplane Out Of Fuel] " .. message
+        "[X2030] " .. message
     )
 end
 
@@ -193,10 +198,16 @@ end
 -- incomplete values are rejected so an interrupted write cannot crash a
 -- FlyWithLua callback or silently move campaign progress to another airport.
 local function load_campaign_save()
-    local save_file = io.open(CAMPAIGN_SAVE_PATH, "r")
+    local loaded_save_path = CAMPAIGN_SAVE_PATH
+    local save_file = io.open(loaded_save_path, "r")
 
     if save_file == nil then
-        return nil, "missing"
+        loaded_save_path = LEGACY_CAMPAIGN_SAVE_PATH
+        save_file = io.open(loaded_save_path, "r")
+    end
+
+    if save_file == nil then
+        return nil, "missing", CAMPAIGN_SAVE_PATH
     end
 
     local saved_values = {}
@@ -217,7 +228,7 @@ local function load_campaign_save()
             saved_values.current_airport
         ) then
 
-        return nil, "invalid"
+        return nil, "invalid", loaded_save_path
     end
 
     local saved_fuel_tanks = {}
@@ -232,7 +243,7 @@ local function load_campaign_save()
             or saved_fuel < 0
             or saved_fuel == math.huge then
 
-            return nil, "invalid"
+            return nil, "invalid", loaded_save_path
         end
 
         saved_fuel_tanks[tank] = saved_fuel
@@ -241,7 +252,7 @@ local function load_campaign_save()
     return {
         current_airport = saved_values.current_airport,
         fuel_tanks = saved_fuel_tanks
-    }, nil
+    }, nil, loaded_save_path
 end
 
 local function save_campaign_progress()
@@ -258,7 +269,7 @@ local function save_campaign_progress()
 
     if save_file == nil then
         logMsg(
-            "[Xplane Out Of Fuel] Could not write campaign save: "
+            "[X2030] Could not write campaign save: "
             .. temporary_path
         )
 
@@ -290,7 +301,7 @@ local function save_campaign_progress()
 
     if not renamed then
         logMsg(
-            "[Xplane Out Of Fuel] Could not finalise campaign save: "
+            "[X2030] Could not finalise campaign save: "
             .. tostring(rename_error)
         )
 
@@ -560,7 +571,7 @@ local function load_valid_land_airports()
         )
 
         logMsg(
-            "[Xplane Out Of Fuel] apt.dat not found at: "
+            "[X2030] apt.dat not found at: "
             .. apt_dat_path
         )
 
@@ -654,7 +665,7 @@ local function load_valid_land_airports()
     end
 
     logMsg(
-        "[Xplane Out Of Fuel] Loaded "
+        "[X2030] Loaded "
         .. tostring(airport_count)
         .. " valid land airports."
     )
@@ -804,7 +815,7 @@ local function refresh_airport_suggestions()
     end
 
     logMsg(
-        "[Xplane Out Of Fuel] "
+        "[X2030] "
         .. tostring(#suggested_airports)
         .. " next-hop suggestions found."
     )
@@ -859,7 +870,8 @@ local function initialise_departure_airport()
     campaign_started = false
     departure_airport = nil
 
-    local saved_campaign, save_error = load_campaign_save()
+    local saved_campaign, save_error, loaded_save_path =
+        load_campaign_save()
 
     if nearest_airport == nil then
         set_status(
@@ -888,8 +900,8 @@ local function initialise_departure_airport()
         )
 
         logMsg(
-            "[Xplane Out Of Fuel] Invalid campaign save: "
-            .. CAMPAIGN_SAVE_PATH
+            "[X2030] Invalid campaign save: "
+            .. loaded_save_path
         )
 
         return
@@ -1314,6 +1326,6 @@ else
 end
 
 logMsg(
-    "[Xplane Out Of Fuel] "
+    "[X2030] "
     .. "Prototype 0.4 ground information and fuel save loaded."
 )
