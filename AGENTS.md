@@ -2,6 +2,10 @@
 
 Before making coding or design decisions, read `project_brief.md`.
 
+Before building each step of the app, also consult the relevant entries in
+`Commands_Xplane12.txt` and `DataRefs_Xplane12.txt`. Use these local X-Plane 12
+references to verify command and dataref names rather than relying on memory.
+
 This project is an X-Plane 12 survival campaign implemented with FlyWithLua.
 
 ## Required principles
@@ -25,4 +29,4 @@ This project is an X-Plane 12 survival campaign implemented with FlyWithLua.
 
 ## Project reference
 
-The complete narrative, gameplay objectives, implemented systems and planned direction are documented in `PROJECT_BRIEF.md`.
+The complete narrative, gameplay objectives, implemented systems and planned direction are documented in `project_brief.md`.
