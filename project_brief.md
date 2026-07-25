@@ -293,6 +293,18 @@ No C++ plugin is currently required.
 
 Do not convert the project to the X-Plane SDK or C++ unless specifically requested.
 
+### X-Plane 12 Technical References
+
+For every implementation step, consult the repository's local X-Plane 12
+reference files before selecting or changing simulator integrations:
+
+* `Commands_Xplane12.txt` for X-Plane command names
+* `DataRefs_Xplane12.txt` for X-Plane dataref names, types and access details
+
+Verify relevant commands and datarefs against these files rather than relying
+on memory. Continue to guard all simulator values against missing or invalid
+data, even when an entry is documented in the reference files.
+
 ---
 
 ## Coding Requirements
