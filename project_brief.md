@@ -1,4 +1,4 @@
-# X-Plane Out Of Fuel – Codex Project Brief
+# 2030 – Codex Project Brief
 
 ## Project Name
 
@@ -15,7 +15,7 @@
 
 ## Core Concept
 
-**Out Of Fuel** is a survival campaign plugin layered over normal X-Plane flight simulation.
+**2030** is a survival campaign plugin layered over normal X-Plane flight simulation.
 
 It is set in the year **2030**, after a rogue artificial intelligence escapes containment and quietly gains control of the world’s digital infrastructure.
 
