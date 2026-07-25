@@ -21,8 +21,10 @@ local CAMPAIGN_SAVE_PATH =
 -- GAME SETTINGS
 ------------------------------------------------------------
 
-local FUEL_GRANT_KG = 50
-local FUEL_PER_TANK_KG = FUEL_GRANT_KG / 2
+-- Depot allocations range from 20 kg to 160 kg. The midpoint (and therefore
+-- the intended average across airports) is 90 kg.
+local AVERAGE_AIRPORT_FUEL_KG = 90
+local AIRPORT_FUEL_VARIATION_KG = 70
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -82,6 +84,7 @@ local nearest_airport_name = nil
 local nearest_airport_distance_km = nil
 
 local suggested_airports = {}
+local airport_fuel_allocations = {}
 -- Airport identifiers confirmed as land airports. Each entry also carries
 -- the longest conventional runway found in apt.dat so recommendation data
 -- remains available without another file scan.
@@ -132,6 +135,41 @@ local function is_valid_airport_identifier(value)
         and string.match(value, "^[A-Z0-9][A-Z0-9]+$") ~= nil
         and #value >= 3
         and #value <= 8
+end
+
+-- Produce a stable, airport-specific allocation rather than rolling a new
+-- amount every time the suggestion list is refreshed. This guarantees that
+-- the quantity advertised before departure is the quantity delivered after
+-- landing, including when FlyWithLua reloads the script between those events.
+local function get_airport_fuel_allocation(airport_icao)
+    if not is_valid_airport_identifier(airport_icao) then
+        return nil
+    end
+
+    if is_number(airport_fuel_allocations[airport_icao]) then
+        return airport_fuel_allocations[airport_icao]
+    end
+
+    local minimum_fuel =
+        AVERAGE_AIRPORT_FUEL_KG - AIRPORT_FUEL_VARIATION_KG
+    local possible_amounts =
+        (AIRPORT_FUEL_VARIATION_KG * 2) + 1
+    local airport_hash = 0
+
+    -- The simple rolling hash is deterministic in Lua 5.1 and distributes
+    -- normal ICAO identifiers throughout the complete 20--160 kg range.
+    for character_index = 1, #airport_icao do
+        airport_hash =
+            (
+                airport_hash * 31
+                + string.byte(airport_icao, character_index)
+            ) % possible_amounts
+    end
+
+    local allocation = minimum_fuel + airport_hash
+    airport_fuel_allocations[airport_icao] = allocation
+
+    return allocation
 end
 
 ------------------------------------------------------------
@@ -705,7 +743,9 @@ local function refresh_airport_suggestions()
                                 airport_icao
                             ),
                         available_fuel =
-                            FUEL_GRANT_KG
+                            get_airport_fuel_allocation(
+                                airport_icao
+                            )
                     }
                 )
             end
@@ -741,16 +781,26 @@ local function get_total_fuel()
     return total_fuel
 end
 
-local function add_balanced_fuel()
+local function add_balanced_fuel(fuel_amount_kg)
+    if not is_number(fuel_amount_kg)
+        or fuel_amount_kg < 0 then
+
+        return false
+    end
+
+    local fuel_per_tank_kg = fuel_amount_kg / 2
+
     xoof_fuel_tanks[0] =
         number_or_zero(xoof_fuel_tanks[0])
         +
-        FUEL_PER_TANK_KG
+        fuel_per_tank_kg
 
     xoof_fuel_tanks[1] =
         number_or_zero(xoof_fuel_tanks[1])
         +
-        FUEL_PER_TANK_KG
+        fuel_per_tank_kg
+
+    return true
 end
 
 ------------------------------------------------------------
@@ -980,7 +1030,16 @@ function xoof_update()
         return
     end
 
-    add_balanced_fuel()
+    local delivered_fuel_kg =
+        get_airport_fuel_allocation(nearest_airport)
+
+    if not add_balanced_fuel(delivered_fuel_kg) then
+        set_status(
+            "Airport fuel allocation unavailable. No fuel delivered."
+        )
+
+        return
+    end
 
     local arrival_airport =
         nearest_airport
@@ -992,7 +1051,9 @@ function xoof_update()
         set_status(
             "Arrived "
             .. arrival_airport
-            .. ". Fuel delivered: 25 kg per tank. Progress saved."
+            .. ". Fuel delivered: "
+            .. tostring(delivered_fuel_kg)
+            .. " kg. Progress saved."
         )
     else
         set_status(
@@ -1097,13 +1158,14 @@ function xoof_draw()
                     "%d. %s | %.0f NM | "
                     .. "HDG %03.0f | "
                     .. "EST %.0f KG | "
-                    .. "%s | DEPOT 50 KG | %s",
+                    .. "%s | DEPOT %.0f KG | %s",
                     index,
                     airport.icao,
                     number_or_zero(airport.distance_nm),
                     number_or_zero(airport.heading),
                     number_or_zero(airport.required_fuel),
                     runway_length_text,
+                    number_or_zero(airport.available_fuel),
                     affordability
                 )
             )
