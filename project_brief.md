@@ -463,12 +463,14 @@ This prevents the player from repeatedly flying between two nearby airports to g
 
 ### Campaign Save System
 
-Save data should eventually include:
+The prototype now saves the current airport and fuel in X-Plane's
+`Output/preferences` directory. A new campaign must begin at NZMO, while an
+existing campaign can resume when the aircraft is loaded at its saved airport.
 
-* current airport
+The save data should eventually expand to include:
+
 * visited airports
 * depleted airports
-* current fuel
 * aircraft condition
 * campaign stage
 * completed story events
