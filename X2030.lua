@@ -36,6 +36,7 @@ local LEGACY_CAMPAIGN_SAVE_PATH =
 -- the intended average across airports) is 90 kg.
 local AVERAGE_AIRPORT_FUEL_KG = 90
 local AIRPORT_FUEL_VARIATION_KG = 70
+local INITIAL_CAMPAIGN_FUEL_KG = 40
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -860,6 +861,17 @@ local function add_balanced_fuel(fuel_amount_kg)
     return true
 end
 
+-- A new campaign begins with an exact, deliberately scarce fuel load. Clear
+-- every simulator tank first so fuel configured in X-Plane cannot carry into
+-- the campaign, then balance the starting load across the SF50's two tanks.
+local function set_initial_campaign_fuel()
+    for tank = 0, 8 do
+        xoof_fuel_tanks[tank] = 0
+    end
+
+    return add_balanced_fuel(INITIAL_CAMPAIGN_FUEL_KG)
+end
+
 ------------------------------------------------------------
 -- INITIAL AIRPORT
 ------------------------------------------------------------
@@ -958,6 +970,7 @@ local function initialise_departure_airport()
     departure_airport =
         CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
+    set_initial_campaign_fuel()
 
     refresh_airport_suggestions()
 
