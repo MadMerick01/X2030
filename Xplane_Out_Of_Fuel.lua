@@ -68,8 +68,9 @@ local nearest_airport_name = nil
 local nearest_airport_distance_km = nil
 
 local suggested_airports = {}
--- Airport identifiers confirmed as land airports
--- with at least one conventional runway.
+-- Airport identifiers confirmed as land airports. Each entry also carries
+-- the longest conventional runway found in apt.dat so recommendation data
+-- remains available without another file scan.
 local valid_land_airports = {}
 local airport_database_loaded = false
 
@@ -335,15 +336,17 @@ local function load_valid_land_airports()
     local current_airport_icao = nil
     local current_airport_is_land = false
     local current_airport_has_runway = false
+    local current_longest_runway_metres = nil
 
     local function save_current_airport()
         if current_airport_icao ~= nil
             and current_airport_is_land
             and current_airport_has_runway then
 
-            valid_land_airports[
-                current_airport_icao
-            ] = true
+            valid_land_airports[current_airport_icao] = {
+                longest_runway_metres =
+                    current_longest_runway_metres
+            }
         end
     end
 
@@ -363,12 +366,43 @@ local function load_valid_land_airports()
                 row_code == 1
 
             current_airport_has_runway = false
+            current_longest_runway_metres = nil
 
         elseif row_code == 100
             and current_airport_is_land then
 
             -- Row 100 describes a conventional land runway.
             current_airport_has_runway = true
+
+            -- apt.dat supplies the latitude and longitude of both runway
+            -- ends. Incomplete or malformed coordinates are ignored rather
+            -- than allowing airport data to interrupt plugin startup.
+            local first_end_latitude = tonumber(fields[10])
+            local first_end_longitude = tonumber(fields[11])
+            local second_end_latitude = tonumber(fields[19])
+            local second_end_longitude = tonumber(fields[20])
+
+            if first_end_latitude ~= nil
+                and first_end_longitude ~= nil
+                and second_end_latitude ~= nil
+                and second_end_longitude ~= nil then
+
+                local runway_length_metres =
+                    calculate_distance_km(
+                        first_end_latitude,
+                        first_end_longitude,
+                        second_end_latitude,
+                        second_end_longitude
+                    ) * 1000
+
+                if current_longest_runway_metres == nil
+                    or runway_length_metres
+                        > current_longest_runway_metres then
+
+                    current_longest_runway_metres =
+                        runway_length_metres
+                end
+            end
         end
     end
 
@@ -399,7 +433,21 @@ local function is_valid_destination_airport(icao)
         return false
     end
 
-    return valid_land_airports[icao] == true
+    return valid_land_airports[icao] ~= nil
+end
+
+local function get_longest_runway_metres(icao)
+    local airport_data = valid_land_airports[icao]
+
+    if airport_data == nil
+        or not is_number(
+            airport_data.longest_runway_metres
+        ) then
+
+        return nil
+    end
+
+    return airport_data.longest_runway_metres
 end
 
 ------------------------------------------------------------
@@ -502,6 +550,10 @@ local function refresh_airport_suggestions()
                         distance_nm = distance_nm,
                         heading = heading,
                         required_fuel = required_fuel,
+                        runway_length_metres =
+                            get_longest_runway_metres(
+                                airport_icao
+                            ),
                         available_fuel =
                             FUEL_GRANT_KG
                     }
@@ -780,6 +832,17 @@ function xoof_draw()
 
         if airport ~= nil then
             local affordability
+            local runway_length_text = "RWY UNKNOWN"
+
+            if is_number(
+                airport.runway_length_metres
+            ) then
+
+                runway_length_text = string.format(
+                    "RWY %.0f M",
+                    airport.runway_length_metres
+                )
+            end
 
             if not is_number(airport.required_fuel) then
                 affordability = "UNKNOWN"
@@ -799,12 +862,13 @@ function xoof_draw()
                     "%d. %s | %.0f NM | "
                     .. "HDG %03.0f | "
                     .. "EST %.0f KG | "
-                    .. "DEPOT 50 KG | %s",
+                    .. "%s | DEPOT 50 KG | %s",
                     index,
                     airport.icao,
                     number_or_zero(airport.distance_nm),
                     number_or_zero(airport.heading),
                     number_or_zero(airport.required_fuel),
+                    runway_length_text,
                     affordability
                 )
             )
