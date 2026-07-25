@@ -3,8 +3,12 @@
 -- Airport-to-airport fuel system and next-hop suggestions
 
 local PLUGIN_NAME = "2030 - AI Apocalypse"
+local MISSION_BRIEFING_LINE_ONE =
+    "You must transport a Black Prompt key to EGLL that may save Humans from an"
+local MISSION_BRIEFING_LINE_TWO =
+    "escaped rouge AI that has a firm grip on all online systems. You must make it. Please..."
 local CURRENT_MISSION_STATUS =
-    "Current Status: Get the Prompt Key to Heathrow EGLL to be decrypted"
+    "Current Status: Get enough fuel to cross the ditch to YSSY"
 
 -- The black key journey always begins at Manapouri / Te Anau Airport.
 -- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
@@ -1165,7 +1169,7 @@ end
 local function draw_display_background(starting_y)
     local panel_left = 24
     local panel_right = 850
-    local panel_bottom = starting_y - 220
+    local panel_bottom = starting_y - 260
     local panel_top = starting_y + 25
 
     set_display_color(DISPLAY_PANEL_COLOR)
@@ -1192,7 +1196,7 @@ local function draw_display_background(starting_y)
 end
 
 local function get_refresh_button_bounds(starting_y)
-    local button_top = starting_y - 92
+    local button_top = starting_y - 132
 
     return REFRESH_BUTTON_LEFT,
         button_top - REFRESH_BUTTON_HEIGHT,
@@ -1215,18 +1219,30 @@ function xoof_draw()
     draw_string_Helvetica_12(
         40,
         starting_y - 25,
-        CURRENT_MISSION_STATUS
+        MISSION_BRIEFING_LINE_ONE
     )
 
     draw_string_Helvetica_12(
         40,
         starting_y - 45,
-        status_message
+        MISSION_BRIEFING_LINE_TWO
     )
 
     draw_string_Helvetica_12(
         40,
         starting_y - 65,
+        CURRENT_MISSION_STATUS
+    )
+
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 85,
+        status_message
+    )
+
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 105,
         string.format(
             "Fuel: %.0f kg | "
             .. "Left: %.0f | Right: %.0f",
@@ -1239,7 +1255,7 @@ function xoof_draw()
     if departure_airport ~= nil then
         draw_string_Helvetica_12(
             40,
-            starting_y - 85,
+            starting_y - 125,
             "Current airport: "
             .. departure_airport
         )
@@ -1247,7 +1263,7 @@ function xoof_draw()
 
     draw_string_Helvetica_18(
         40,
-        starting_y - 115,
+        starting_y - 155,
         "SUGGESTED NEXT HOPS"
     )
 
@@ -1280,7 +1296,7 @@ function xoof_draw()
         local line_y =
             starting_y
             -
-            115
+            155
             -
             (index * 25)
 
