@@ -4,6 +4,19 @@
 
 local PLUGIN_NAME = "Xplane Out Of Fuel"
 
+-- The black key journey always begins at Manapouri / Te Anau Airport.
+-- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
+local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
+local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
+local CAMPAIGN_SAVE_VERSION = 1
+local CAMPAIGN_SAVE_PATH =
+    SYSTEM_DIRECTORY
+    .. "Output"
+    .. DIRECTORY_SEPARATOR
+    .. "preferences"
+    .. DIRECTORY_SEPARATOR
+    .. "Xplane_Out_Of_Fuel_Campaign.txt"
+
 ------------------------------------------------------------
 -- GAME SETTINGS
 ------------------------------------------------------------
@@ -61,6 +74,7 @@ xoof_fuel_tanks = dataref_table(
 
 local has_been_airborne = false
 local current_landing_processed = false
+local campaign_started = false
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -111,6 +125,142 @@ local function number_or_zero(value)
     end
 
     return 0
+end
+
+local function is_valid_airport_identifier(value)
+    return type(value) == "string"
+        and string.match(value, "^[A-Z0-9][A-Z0-9]+$") ~= nil
+        and #value >= 3
+        and #value <= 8
+end
+
+------------------------------------------------------------
+-- CAMPAIGN SAVE FILE
+------------------------------------------------------------
+
+-- The save file intentionally uses a small, readable key/value format. Bad or
+-- incomplete values are rejected so an interrupted write cannot crash a
+-- FlyWithLua callback or silently move campaign progress to another airport.
+local function load_campaign_save()
+    local save_file = io.open(CAMPAIGN_SAVE_PATH, "r")
+
+    if save_file == nil then
+        return nil, "missing"
+    end
+
+    local saved_values = {}
+
+    for line in save_file:lines() do
+        local key, value = string.match(line, "^([%w_]+)=(.*)$")
+
+        if key ~= nil then
+            saved_values[key] = value
+        end
+    end
+
+    save_file:close()
+
+    if tonumber(saved_values.version) ~= CAMPAIGN_SAVE_VERSION
+        or saved_values.campaign_started ~= "1"
+        or not is_valid_airport_identifier(
+            saved_values.current_airport
+        ) then
+
+        return nil, "invalid"
+    end
+
+    local saved_fuel_tanks = {}
+
+    for tank = 0, 8 do
+        local saved_fuel = tonumber(
+            saved_values["fuel_tank_" .. tostring(tank)]
+        )
+
+        if saved_fuel == nil
+            or saved_fuel ~= saved_fuel
+            or saved_fuel < 0
+            or saved_fuel == math.huge then
+
+            return nil, "invalid"
+        end
+
+        saved_fuel_tanks[tank] = saved_fuel
+    end
+
+    return {
+        current_airport = saved_values.current_airport,
+        fuel_tanks = saved_fuel_tanks
+    }, nil
+end
+
+local function save_campaign_progress()
+    if not campaign_started
+        or not is_valid_airport_identifier(
+            departure_airport
+        ) then
+
+        return false
+    end
+
+    local temporary_path = CAMPAIGN_SAVE_PATH .. ".tmp"
+    local save_file = io.open(temporary_path, "w")
+
+    if save_file == nil then
+        logMsg(
+            "[Xplane Out Of Fuel] Could not write campaign save: "
+            .. temporary_path
+        )
+
+        return false
+    end
+
+    save_file:write(
+        "version=", tostring(CAMPAIGN_SAVE_VERSION), "\n",
+        "campaign_started=1\n",
+        "current_airport=", departure_airport, "\n"
+    )
+
+    for tank = 0, 8 do
+        save_file:write(
+            "fuel_tank_", tostring(tank), "=",
+            string.format("%.3f", number_or_zero(xoof_fuel_tanks[tank])),
+            "\n"
+        )
+    end
+
+    save_file:close()
+
+    -- Rename only after the complete temporary file has been closed. Removing
+    -- the old file first keeps replacement compatible with Windows builds.
+    os.remove(CAMPAIGN_SAVE_PATH)
+
+    local renamed, rename_error =
+        os.rename(temporary_path, CAMPAIGN_SAVE_PATH)
+
+    if not renamed then
+        logMsg(
+            "[Xplane Out Of Fuel] Could not finalise campaign save: "
+            .. tostring(rename_error)
+        )
+
+        return false
+    end
+
+    return true
+end
+
+local function restore_saved_fuel(saved_fuel_tanks)
+    if type(saved_fuel_tanks) ~= "table" then
+        return
+    end
+
+    for tank = 0, 8 do
+        local saved_fuel = saved_fuel_tanks[tank]
+
+        if is_number(saved_fuel) and saved_fuel >= 0 then
+            xoof_fuel_tanks[tank] = saved_fuel
+        end
+    end
 end
 
 ------------------------------------------------------------
@@ -610,42 +760,110 @@ end
 local function initialise_departure_airport()
     update_nearest_airport()
 
+    campaign_started = false
+    departure_airport = nil
+
+    local saved_campaign, save_error = load_campaign_save()
+
     if nearest_airport == nil then
         set_status(
-            "No airport could be identified."
+            "Campaign unavailable. No airport could be identified."
         )
 
         return
     end
 
-    if nearest_airport_distance_km
-        >
-        MAX_AIRPORT_DISTANCE_KM then
+    if not is_number(nearest_airport_distance_km)
+        or nearest_airport_distance_km
+            > MAX_AIRPORT_DISTANCE_KM then
 
         set_status(
-            string.format(
-                "Nearest airport is %s, "
-                .. "but it is %.1f km away.",
-                nearest_airport,
-                nearest_airport_distance_km
+            "Campaign start unavailable. Position the aircraft at "
+            .. CAMPAIGN_START_AIRPORT_ICAO
+            .. "."
+        )
+
+        return
+    end
+
+    if save_error == "invalid" then
+        set_status(
+            "Campaign save is invalid. Check X-Plane Log.txt."
+        )
+
+        logMsg(
+            "[Xplane Out Of Fuel] Invalid campaign save: "
+            .. CAMPAIGN_SAVE_PATH
+        )
+
+        return
+    end
+
+    if saved_campaign ~= nil then
+        if not is_valid_destination_airport(
+            saved_campaign.current_airport
+        ) then
+
+            set_status(
+                "Saved airport is unavailable in the airport database."
             )
+
+            return
+        end
+
+        if nearest_airport ~= saved_campaign.current_airport then
+            set_status(
+                "Saved campaign is at "
+                .. saved_campaign.current_airport
+                .. ". Load the aircraft there to continue."
+            )
+
+            return
+        end
+
+        departure_airport = saved_campaign.current_airport
+        campaign_started = true
+        restore_saved_fuel(saved_campaign.fuel_tanks)
+
+        set_status(
+            "Campaign resumed at "
+            .. departure_airport
+            .. ". Select your next hop."
+        )
+
+        refresh_airport_suggestions()
+        return
+    end
+
+    if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO then
+        set_status(
+            "Campaign begins at "
+            .. CAMPAIGN_START_AIRPORT_ICAO
+            .. " ("
+            .. CAMPAIGN_START_AIRPORT_NAME
+            .. ")."
         )
 
         return
     end
 
     departure_airport =
-        nearest_airport
-
-    set_status(
-        string.format(
-            "Starting airport: %s. "
-            .. "Select your next hop.",
-            departure_airport
-        )
-    )
+        CAMPAIGN_START_AIRPORT_ICAO
+    campaign_started = true
 
     refresh_airport_suggestions()
+
+    if save_campaign_progress() then
+        set_status(
+            "Starting airport: "
+            .. departure_airport
+            .. ". Select your next hop."
+        )
+    else
+        set_status(
+            "Campaign started at NZMO, but progress could not be saved."
+        )
+    end
 end
 
 ------------------------------------------------------------
@@ -653,6 +871,12 @@ end
 ------------------------------------------------------------
 
 function xoof_update()
+    -- Do not advance campaign state until a new NZMO start or a valid saved
+    -- campaign at the aircraft's present airport has been established.
+    if not campaign_started then
+        return
+    end
+
     local engine_is_running =
         xoof_engine_running[0] == 1
 
@@ -718,17 +942,12 @@ function xoof_update()
         return
     end
 
-    if nearest_airport_distance_km
-        >
-        MAX_AIRPORT_DISTANCE_KM then
+    if not is_number(nearest_airport_distance_km)
+        or nearest_airport_distance_km
+            > MAX_AIRPORT_DISTANCE_KM then
 
         set_status(
-            string.format(
-                "%s is %.1f km away. "
-                .. "No fuel delivered.",
-                nearest_airport,
-                nearest_airport_distance_km
-            )
+            "Airport distance unavailable. No fuel delivered."
         )
 
         return
@@ -738,11 +957,21 @@ function xoof_update()
         ==
         departure_airport then
 
-        set_status(
-            "Returned to "
-            .. nearest_airport
-            .. ". This airport has no new fuel."
-        )
+        local return_was_saved = save_campaign_progress()
+
+        if return_was_saved then
+            set_status(
+                "Returned to "
+                .. nearest_airport
+                .. ". This airport has no new fuel."
+            )
+        else
+            set_status(
+                "Returned to "
+                .. nearest_airport
+                .. ". Campaign save failed."
+            )
+        end
 
         has_been_airborne = false
 
@@ -756,16 +985,22 @@ function xoof_update()
     local arrival_airport =
         nearest_airport
 
-    set_status(
-        string.format(
-            "Arrived %s. "
-            .. "Fuel delivered: 25 kg per tank.",
-            arrival_airport
-        )
-    )
-
     departure_airport =
         arrival_airport
+
+    if save_campaign_progress() then
+        set_status(
+            "Arrived "
+            .. arrival_airport
+            .. ". Fuel delivered: 25 kg per tank. Progress saved."
+        )
+    else
+        set_status(
+            "Arrived "
+            .. arrival_airport
+            .. ". Fuel delivered, but campaign save failed."
+        )
+    end
 
     has_been_airborne = false
 

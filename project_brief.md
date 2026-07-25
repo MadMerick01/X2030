@@ -138,7 +138,8 @@ The player owns a:
 
 **Cirrus Vision Jet SF50**
 
-The campaign begins at a small airfield in New Zealand.
+The campaign begins at **NZMO Manapouri / Te Anau Airport (IATA: TEU)** in
+New Zealand's Southland Region.
 
 The player is one of the few people who still has:
 
@@ -197,7 +198,8 @@ There is no fixed sequence of airports.
 
 ## Primary Gameplay Loop
 
-The player begins at an airport with limited fuel.
+The player begins at **NZMO Manapouri / Te Anau Airport (TEU)** with limited
+fuel.
 
 The plugin identifies nearby usable airports.
 
@@ -473,12 +475,14 @@ This prevents the player from repeatedly flying between two nearby airports to g
 
 ### Campaign Save System
 
-Save data should eventually include:
+The prototype now saves the current airport and fuel in X-Plane's
+`Output/preferences` directory. A new campaign must begin at NZMO, while an
+existing campaign can resume when the aircraft is loaded at its saved airport.
 
-* current airport
+The save data should eventually expand to include:
+
 * visited airports
 * depleted airports
-* current fuel
 * aircraft condition
 * campaign stage
 * completed story events
