@@ -14,6 +14,8 @@ local CURRENT_MISSION_STATUS =
 -- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
 local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
+local REQUIRED_AIRCRAFT_ICAO = "SF50"
+local REQUIRED_AIRCRAFT_NAME = "Cirrus Vision SF50"
 local CAMPAIGN_SAVE_VERSION = 1
 local CAMPAIGN_PREFERENCES_DIRECTORY =
     SYSTEM_DIRECTORY
@@ -55,6 +57,15 @@ local DISPLAY_TEXT_COLOR = { 1.00, 1.00, 1.00, 1.00 }
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
 ------------------------------------------------------------
+
+-- X-Plane exposes the aircraft ICAO designator entered by its author. The
+-- bundled Cirrus Vision Jet uses SF50, giving the campaign a stable check that
+-- does not depend on a localised UI name or installation path.
+dataref(
+    "xoof_aircraft_icao",
+    "sim/aircraft/view/acf_ICAO",
+    "readonly"
+)
 
 dataref(
     "xoof_on_ground",
@@ -147,6 +158,24 @@ local function number_or_zero(value)
     end
 
     return 0
+end
+
+local function is_required_campaign_aircraft_loaded()
+    if type(xoof_aircraft_icao) ~= "string" then
+        return false
+    end
+
+    local normalised_aircraft_icao = string.upper(
+        string.match(xoof_aircraft_icao, "^%s*(.-)%s*$") or ""
+    )
+
+    return normalised_aircraft_icao == REQUIRED_AIRCRAFT_ICAO
+end
+
+local function aircraft_requirement_message()
+    return "Load the "
+        .. REQUIRED_AIRCRAFT_NAME
+        .. " to continue the campaign."
 end
 
 local function is_valid_airport_identifier(value)
@@ -877,10 +906,18 @@ end
 ------------------------------------------------------------
 
 local function initialise_departure_airport()
-    update_nearest_airport()
-
     campaign_started = false
     departure_airport = nil
+
+    -- Never initialise or restore campaign fuel in another aircraft. This also
+    -- leaves the save untouched until the player reloads the required SF50.
+    if not is_required_campaign_aircraft_loaded() then
+        suggested_airports = {}
+        set_status(aircraft_requirement_message())
+        return
+    end
+
+    update_nearest_airport()
 
     local saved_campaign, save_error, loaded_save_path =
         load_campaign_save()
@@ -992,6 +1029,13 @@ end
 ------------------------------------------------------------
 
 function xoof_update()
+    -- Aircraft changes normally reload FlyWithLua scripts, but retain this guard
+    -- so a mid-session change can never save fuel or advance the SF50 campaign.
+    if not is_required_campaign_aircraft_loaded() then
+        suggested_airports = {}
+        return
+    end
+
     -- Do not advance campaign state until a new NZMO start or a valid saved
     -- campaign at the aircraft's present airport has been established.
     if not campaign_started then
@@ -1221,7 +1265,9 @@ function xoof_draw()
     draw_string_Helvetica_12(
         40,
         starting_y - 85,
-        status_message
+        is_required_campaign_aircraft_loaded()
+            and status_message
+            or aircraft_requirement_message()
     )
 
     draw_string_Helvetica_12(
@@ -1318,7 +1364,9 @@ end
 
 
 function xoof_save_before_exit()
-    save_campaign_progress()
+    if is_required_campaign_aircraft_loaded() then
+        save_campaign_progress()
+    end
 end
 
 ------------------------------------------------------------
