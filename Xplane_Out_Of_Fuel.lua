@@ -32,6 +32,12 @@ local ESTIMATED_AVERAGE_SPEED_KT = 180
 local ESTIMATED_FUEL_FLOW_KG_PER_MIN = 2.5
 local DEPARTURE_FUEL_ALLOWANCE_KG = 8
 
+-- Restrained mission-computer colours. The dark translucent panel keeps the
+-- white text readable against bright clouds without obscuring the flight view.
+local DISPLAY_PANEL_COLOR = { 0.03, 0.06, 0.09, 0.82 }
+local DISPLAY_ACCENT_COLOR = { 0.10, 0.75, 0.90, 0.95 }
+local DISPLAY_TEXT_COLOR = { 1.00, 1.00, 1.00, 1.00 }
+
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
 ------------------------------------------------------------
@@ -1011,9 +1017,49 @@ end
 -- DISPLAY
 ------------------------------------------------------------
 
+local function set_display_color(color)
+    graphics.set_color(
+        color[1],
+        color[2],
+        color[3],
+        color[4]
+    )
+end
+
+local function draw_display_background(starting_y)
+    local panel_left = 24
+    local panel_right = 850
+    local panel_bottom = starting_y - 195
+    local panel_top = starting_y + 25
+
+    set_display_color(DISPLAY_PANEL_COLOR)
+    graphics.draw_rectangle(
+        panel_left,
+        panel_bottom,
+        panel_right,
+        panel_top
+    )
+
+    -- A narrow cyan edge identifies the campaign display without turning the
+    -- restrained aviation interface into an arcade-style HUD.
+    set_display_color(DISPLAY_ACCENT_COLOR)
+    graphics.draw_rectangle(
+        panel_left,
+        panel_bottom,
+        panel_left + 4,
+        panel_top
+    )
+
+    -- FlyWithLua's string helpers use the active graphics colour, so restore
+    -- white before any existing text is drawn.
+    set_display_color(DISPLAY_TEXT_COLOR)
+end
+
 function xoof_draw()
     local starting_y =
         SCREEN_HIGHT - 60
+
+    draw_display_background(starting_y)
 
     draw_string_Helvetica_18(
         40,
