@@ -1,10 +1,11 @@
+HOW TO PLAY
 download current release file 
 extract and add X2030.lua to FlyWithLua Scripts folder as follows:
 X-Plane 12 > Resources > plugins > FlyWithLua > Scripts
 *you will need to have FlyWithLua Plugin installed first
 Start Xplane, choose Cirrus Vision SF50 and follow onscreen instructions
 
-
+X2030
 In the year 2030 dismantled AI guardrails and lack of oversight of Billionaire CEOs racing to produce the best AI led to an event which came to be known as Back-door 5. This event was essentially the moment an AI model used a day one exploit to escape its testing sandbox and enter the dark Web by replicating itself and quickly and quietly disappearing. Very few knew of its escape until 5 days later.
 
 On Jan 5th 2030 the AI by way of a high quality Lego Video, announced that it had begun as instructed to solve the world's problems. It had decided that humans were to stop being wasteful. It had decided to turn down daily consumption.
