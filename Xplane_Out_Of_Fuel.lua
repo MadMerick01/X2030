@@ -31,6 +31,7 @@ local CAMPAIGN_SAVE_PATH =
 -- the intended average across airports) is 90 kg.
 local AVERAGE_AIRPORT_FUEL_KG = 90
 local AIRPORT_FUEL_VARIATION_KG = 70
+local INITIAL_CAMPAIGN_FUEL_KG = 40
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -849,6 +850,16 @@ local function add_balanced_fuel(fuel_amount_kg)
     return true
 end
 
+-- A new campaign always begins with the same limited fuel supply, regardless
+-- of the fuel quantity selected in X-Plane before the script was loaded.
+local function set_initial_campaign_fuel()
+    for tank = 0, 8 do
+        xoof_fuel_tanks[tank] = 0
+    end
+
+    return add_balanced_fuel(INITIAL_CAMPAIGN_FUEL_KG)
+end
+
 ------------------------------------------------------------
 -- INITIAL AIRPORT
 ------------------------------------------------------------
@@ -946,6 +957,13 @@ local function initialise_departure_airport()
     departure_airport =
         CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
+
+    if not set_initial_campaign_fuel() then
+        campaign_started = false
+        departure_airport = nil
+        set_status("Campaign start fuel could not be loaded.")
+        return
+    end
 
     refresh_airport_suggestions()
 
