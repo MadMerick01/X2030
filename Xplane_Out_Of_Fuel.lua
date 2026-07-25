@@ -46,12 +46,6 @@ local DISPLAY_PANEL_COLOR = { 0.03, 0.06, 0.09, 0.82 }
 local DISPLAY_ACCENT_COLOR = { 0.10, 0.75, 0.90, 0.95 }
 local DISPLAY_TEXT_COLOR = { 1.00, 1.00, 1.00, 1.00 }
 
--- Screen-space bounds shared by the draw and mouse callbacks. Keeping the
--- action in the existing overlay avoids opening another window in the cockpit.
-local REFRESH_BUTTON_LEFT = 640
-local REFRESH_BUTTON_RIGHT = 830
-local REFRESH_BUTTON_HEIGHT = 24
-
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
 ------------------------------------------------------------
@@ -1127,32 +1121,6 @@ function xoof_update()
 end
 
 
--- Ground communications are available only after a complete landing and
--- shutdown (or while parked before the first departure).
-local function ground_information_available()
-    return campaign_started
-        and xoof_on_ground ~= 0
-        and number_or_zero(xoof_groundspeed) < STOPPED_SPEED_MPS
-        and xoof_engine_running[0] ~= 1
-        and not has_been_airborne
-end
-
-local function refresh_ground_airport_information()
-    if not ground_information_available() then
-        set_status(
-            "Airport update unavailable. Land, stop and shut down first."
-        )
-        return false
-    end
-
-    update_nearest_airport()
-    refresh_airport_suggestions()
-    save_fuel_if_changed()
-    set_status("Ground link updated. Three nearest airports recalculated.")
-
-    return true
-end
-
 ------------------------------------------------------------
 -- DISPLAY
 ------------------------------------------------------------
@@ -1193,15 +1161,6 @@ local function draw_display_background(starting_y)
     -- FlyWithLua's string helpers use the active graphics colour, so restore
     -- white before any existing text is drawn.
     set_display_color(DISPLAY_TEXT_COLOR)
-end
-
-local function get_refresh_button_bounds(starting_y)
-    local button_top = starting_y - 132
-
-    return REFRESH_BUTTON_LEFT,
-        button_top - REFRESH_BUTTON_HEIGHT,
-        REFRESH_BUTTON_RIGHT,
-        button_top
 end
 
 function xoof_draw()
@@ -1265,28 +1224,6 @@ function xoof_draw()
         40,
         starting_y - 155,
         "SUGGESTED NEXT HOPS"
-    )
-
-    local button_left, button_bottom, button_right, button_top =
-        get_refresh_button_bounds(starting_y)
-
-    if ground_information_available() then
-        set_display_color(DISPLAY_ACCENT_COLOR)
-    else
-        graphics.set_color(0.30, 0.34, 0.37, 0.90)
-    end
-
-    graphics.draw_rectangle(
-        button_left,
-        button_bottom,
-        button_right,
-        button_top
-    )
-    set_display_color(DISPLAY_TEXT_COLOR)
-    draw_string_Helvetica_12(
-        button_left + 15,
-        button_bottom + 7,
-        "RECALCULATE AIRPORTS"
     )
 
     for index = 1, 3 do
@@ -1355,24 +1292,6 @@ function xoof_draw()
 end
 
 
-function xoof_mouse_click()
-    -- Allow normal cockpit interaction for clicks outside this overlay action.
-    RESUME_MOUSE_CLICK = true
-
-    local starting_y = SCREEN_HIGHT - 60
-    local button_left, button_bottom, button_right, button_top =
-        get_refresh_button_bounds(starting_y)
-
-    if MOUSE_X >= button_left
-        and MOUSE_X <= button_right
-        and MOUSE_Y >= button_bottom
-        and MOUSE_Y <= button_top then
-
-        RESUME_MOUSE_CLICK = false
-        refresh_ground_airport_information()
-    end
-end
-
 function xoof_save_before_exit()
     save_campaign_progress()
 end
@@ -1383,7 +1302,6 @@ end
 
 do_often("xoof_update()")
 do_every_draw("xoof_draw()")
-do_on_mouse_click("xoof_mouse_click()")
 do_on_exit("xoof_save_before_exit()")
 
 if load_valid_land_airports() then
