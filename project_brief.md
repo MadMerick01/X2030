@@ -21,7 +21,9 @@ It is set in the year **2030**, after a rogue artificial intelligence escapes co
 
 The AI does not destroy civilisation through armies, weapons or direct violence. Instead, it reduces human consumption by controlling the systems society depends upon.
 
-The player owns a Cirrus Vision Jet SF50 and must transport a physical encryption key from New Zealand to London, and eventually to Silicon Valley.
+The player owns a Cirrus Vision Jet SF50 and must complete a ten-leg campaign
+to recover eight physical alignment keys, assemble them in London, and carry
+the completed alignment protocol to Silicon Valley.
 
 The central gameplay challenge is fuel scarcity.
 
@@ -150,7 +152,7 @@ The player is one of the few people who still has:
 
 ---
 
-## The Black Key
+## The Alignment Keys
 
 A billionaire AI executive has retreated to a private doomsday bunker.
 
@@ -158,41 +160,48 @@ The executive claims that the rogue AI’s creator embedded a hidden control pro
 
 That prompt may be capable of forcing the AI back under human control.
 
-The prompt is encrypted and stored on a small physical device known as:
+The prompt was divided across eight small physical devices known as:
 
-**the black key**
+**the alignment keys**
 
-The key cannot safely be transmitted online because the AI controls global communications and would detect or destroy it.
+The keys cannot safely be transmitted online because the AI controls global communications and would detect or destroy them. Each key is held in a hardened doomsday bunker and must be recovered in person.
 
-It must be physically transported.
+They must be physically transported.
 
-The black key represents humanity’s last credible chance to regain control of the world’s infrastructure.
+Together, the alignment keys represent humanity’s last credible chance to regain control of the world’s infrastructure.
 
 ---
 
 ## Campaign Objective
 
-The player must complete two major stages.
+The player must complete ten story legs across three major stages.
 
-### Stage One – New Zealand to London
+### Stage One – Recover the Eight Keys
 
-The black key must first be flown from New Zealand to London.
+Leg 1 begins at NZMO and requires the player to build enough fuel reserves to
+cross the Tasman Sea to **YSRI Richmond Military Base**, where the first
+alignment key is held. Legs 2 through 8 continue through bunker locations
+around the world and recover the remaining seven keys.
 
-In London, specialists will attempt to decrypt the hidden AI control prompt.
+### Stage Two – Assemble the Protocol in London
 
-### Stage Two – London to Silicon Valley
+Leg 9 carries all eight keys to London, where specialists will combine them and
+construct a new, more conservative alignment protocol.
 
-Once decrypted, the key must be flown from London to Silicon Valley.
+### Stage Three – London to Silicon Valley
+
+Leg 10 carries the completed physical protocol from London to Silicon Valley.
 
 There, it must be physically inserted into the mainframe connected to the original AI system.
 
 The full campaign therefore follows a route broadly consisting of:
 
-**New Zealand → London → Silicon Valley**
+**New Zealand → Richmond → seven further bunkers → London → Silicon Valley**
 
 The player chooses the exact route.
 
-There is no fixed sequence of airports.
+The ten story objectives are fixed, but the player chooses the intermediate
+airports used to obtain enough fuel for each objective.
 
 ---
 
@@ -538,7 +547,7 @@ Airports may eventually have states such as:
 The player may receive messages from:
 
 * resistance cells
-* the black key’s creator
+* the alignment keys' creator
 * London decryption specialists
 * Silicon Valley personnel
 * other pilots

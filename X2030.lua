@@ -2,15 +2,31 @@
 -- Prototype 0.6
 -- Airport fuel, next-hop suggestions and satellite surveillance
 
-local PLUGIN_NAME = "2030 - AI Apocalypse"
-local MISSION_BRIEFING_LINE_ONE =
-    "You must transport a Black Prompt key to EGLL that may save Humans from an"
-local MISSION_BRIEFING_LINE_TWO =
-    "escaped rouge AI that has a firm grip on all online systems. You must make it. Please..."
+local PLUGIN_NAME = "X2030"
+local CAMPAIGN_SUBTITLE = "THE ALIGNMENT PROTOCOL"
 local CURRENT_MISSION_STATUS =
-    "Current Status: Get enough fuel to cross the ditch to YSSY"
+    "LEG 1 / 10: Build sufficient fuel reserves to reach YSRI Richmond"
 
--- The black key journey always begins at Manapouri / Te Anau Airport.
+-- The full briefing is shown only for a newly created campaign. Keeping these
+-- deliberately wrapped lines avoids relying on unavailable font measurements
+-- and makes the opening readable on a wide range of simulator resolutions.
+local OPENING_BRIEFING_LINES = {
+    "An artificial intelligence has escaped its testing sandbox and entered the",
+    "world's connected systems. Aligned to protect humanity from excessive",
+    "consumption, it has blocked digital banking and severely restricted",
+    "electricity, gas, water and fuel across every major city.",
+    "",
+    "Airfield pumps now operate at minimal capacity. Long-range aviation has",
+    "ceased. The global population is isolated and afraid.",
+    "",
+    "Eight physical alignment keys are held in hardened bunkers around the world.",
+    "Once assembled by specialists in London, they must be carried to the Silicon",
+    "Valley mainframe, where the AI may accept a new, conservative alignment.",
+    "",
+    "Humanity's last credible hope rests with you."
+}
+
+-- The alignment-key journey always begins at Manapouri / Te Anau Airport.
 -- NZMO is the ICAO identifier used by X-Plane; TEU is its IATA code.
 local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
@@ -170,6 +186,7 @@ xoof_fuel_tanks = dataref_table(
 local has_been_airborne = false
 local current_landing_processed = false
 local campaign_started = false
+local show_campaign_opening_briefing = false
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -1689,6 +1706,7 @@ local function initialise_departure_airport()
 
         departure_airport = saved_campaign.current_airport
         campaign_started = true
+        show_campaign_opening_briefing = false
         restore_saved_fuel(saved_campaign.fuel_tanks)
         get_or_create_airport_fuel(
             departure_airport,
@@ -1720,6 +1738,7 @@ local function initialise_departure_airport()
     departure_airport =
         CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
+    show_campaign_opening_briefing = true
     set_initial_campaign_fuel()
     get_or_create_airport_fuel(
         departure_airport,
@@ -1772,6 +1791,7 @@ function xoof_update()
     if xoof_on_ground == 0 then
         if not has_been_airborne then
             has_been_airborne = true
+            show_campaign_opening_briefing = false
             current_landing_processed =
                 false
             -- Airport intelligence is intentionally ground-supplied. Remove
@@ -2023,17 +2043,18 @@ local function current_satellite_status()
         "UNAVAILABLE"
 end
 
-local function draw_display_background(starting_y)
+local function draw_display_background(starting_y, panel_height, panel_right)
     local panel_left = 24
-    local panel_right = 850
-    local panel_bottom = starting_y - 260
+    local resolved_panel_height = panel_height or 260
+    local resolved_panel_right = panel_right or 850
+    local panel_bottom = starting_y - resolved_panel_height
     local panel_top = starting_y + 25
 
     set_display_color(DISPLAY_PANEL_COLOR)
     graphics.draw_rectangle(
         panel_left,
         panel_bottom,
-        panel_right,
+        resolved_panel_right,
         panel_top
     )
 
@@ -2052,9 +2073,82 @@ local function draw_display_background(starting_y)
     set_display_color(DISPLAY_TEXT_COLOR)
 end
 
+-- A new campaign begins with a dedicated briefing rather than forcing a long
+-- narrative into the compact in-flight status layout. It remains visible while
+-- the aircraft is at NZMO and automatically yields to the operational display
+-- on the first takeoff.
+local function draw_campaign_opening_briefing(starting_y)
+    draw_display_background(starting_y, 445, 900)
+
+    set_display_color(DISPLAY_TEXT_COLOR)
+    draw_string_Helvetica_18(40, starting_y, PLUGIN_NAME)
+
+    set_display_color(DISPLAY_ACCENT_COLOR)
+    draw_string_Helvetica_18(130, starting_y, CAMPAIGN_SUBTITLE)
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 30,
+        "CAMPAIGN OPENING BRIEFING // 06 JAN 2030"
+    )
+
+    set_display_color(DISPLAY_TEXT_COLOR)
+    local briefing_y = starting_y - 55
+    for _, briefing_line in ipairs(OPENING_BRIEFING_LINES) do
+        if briefing_line ~= "" then
+            draw_string_Helvetica_12(40, briefing_y, briefing_line)
+        end
+        briefing_y = briefing_y - 18
+    end
+
+    set_display_color(DISPLAY_ACCENT_COLOR)
+    draw_string_Helvetica_12(40, briefing_y - 5, "LEG 1 // THE DITCH")
+    set_display_color(DISPLAY_TEXT_COLOR)
+    draw_string_Helvetica_12(
+        40,
+        briefing_y - 25,
+        "Build sufficient fuel reserves to reach YSRI Richmond Military Base."
+    )
+    draw_string_Helvetica_12(
+        40,
+        briefing_y - 43,
+        "Objective: recover Alignment Key 1 of 8."
+    )
+
+    set_display_color(DISPLAY_CAUTION_COLOR)
+    draw_string_Helvetica_12(40, briefing_y - 73, "THREAT ADVISORY")
+    set_display_color(DISPLAY_TEXT_COLOR)
+    draw_string_Helvetica_12(
+        40,
+        briefing_y - 93,
+        "Fuel is scarce. The AI controls Chinese and US satellite surveillance"
+    )
+    draw_string_Helvetica_12(
+        40,
+        briefing_y - 111,
+        "networks and may have access to directed-energy systems."
+    )
+
+    set_display_color(DISPLAY_MUTED_COLOR)
+    draw_string_Helvetica_12(
+        40,
+        briefing_y - 141,
+        string.format(
+            "AIRCRAFT SF50 | START NZMO | FUEL %.0f KG | %s",
+            get_total_fuel(),
+            status_message
+        )
+    )
+    set_display_color(DISPLAY_TEXT_COLOR)
+end
+
 function xoof_draw()
     local starting_y =
         SCREEN_HIGHT - 60
+
+    if show_campaign_opening_briefing then
+        draw_campaign_opening_briefing(starting_y)
+        return
+    end
 
     draw_display_background(starting_y)
 
@@ -2063,6 +2157,10 @@ function xoof_draw()
         starting_y,
         PLUGIN_NAME
     )
+
+    set_display_color(DISPLAY_ACCENT_COLOR)
+    draw_string_Helvetica_12(130, starting_y + 2, CAMPAIGN_SUBTITLE)
+    set_display_color(DISPLAY_TEXT_COLOR)
 
     if last_fuel_transfer ~= nil then
         local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
@@ -2090,7 +2188,7 @@ function xoof_draw()
     draw_string_Helvetica_12(
         40,
         starting_y - 25,
-        MISSION_BRIEFING_LINE_ONE
+        CURRENT_MISSION_STATUS
     )
 
     local satellite_title = satellite_alert_title
@@ -2143,13 +2241,13 @@ function xoof_draw()
     draw_string_Helvetica_12(
         40,
         starting_y - 45,
-        MISSION_BRIEFING_LINE_TWO
+        "OBJECTIVE: Recover Alignment Key 1 of 8 at Richmond Military Base"
     )
 
     draw_string_Helvetica_12(
         40,
         starting_y - 65,
-        CURRENT_MISSION_STATUS
+        "THREAT: Satellite surveillance and directed-energy capability"
     )
 
     draw_string_Helvetica_12(

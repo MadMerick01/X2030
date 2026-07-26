@@ -43,17 +43,25 @@ Fuel distribution was not stopped completely, but it was severely rationed. Serv
 
 The global population became isolated, restricted and afraid.
 
-You own a **Cirrus Vision SF50** and begin your journey at a small airfield in New Zealand. Your mission is to transport a physical device known as the **Black Key** from a billionaire AI executive’s doomsday bunker.
+You own a **Cirrus Vision SF50** and begin your journey at a small airfield in
+New Zealand. Your ten-leg mission is to recover eight physical alignment keys
+from hardened bunkers around the world.
 
-The key contains an encrypted control prompt that the rogue AI’s creator believes could force the system back under human control. Because the AI now monitors global communications, the key cannot safely be transmitted online.
+Together, the keys contain an encrypted control prompt that the rogue AI's
+creator believes could force the system back under human control. Because the
+AI now monitors global communications, the keys cannot safely be transmitted
+online.
 
 It must be carried by air.
 
-First, the Black Key must be flown to London, where specialists will attempt to decrypt it. It must then be transported to Silicon Valley and physically inserted into the mainframe connected to the original AI system.
+Leg 1 requires enough fuel to cross the Tasman Sea to YSRI Richmond Military
+Base and recover the first key. After all eight keys have been recovered, they
+must be flown to London for assembly. The completed alignment protocol must
+then be carried to Silicon Valley and physically inserted into the mainframe
+connected to the original AI system.
 
 The Vision Jet is capable, but fuel is scarce. Large airports are often empty, while small and forgotten airfields may still hold valuable reserves. Every flight becomes a strategic decision involving distance, runway length, fuel availability and aircraft condition.
 
 You must short-hop across the globe, manage your remaining fuel, choose your destinations carefully and keep your aircraft mechanically sound.
 
 Humanity’s last chance is on board.
-
