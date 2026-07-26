@@ -68,6 +68,15 @@ local SATELLITE_STRIKE_MESSAGE_SECONDS = 12
 local SATELLITE_NEAR_COVERAGE_NM = 10
 local METRES_PER_FOOT = 0.3048
 
+-- FlyWithLua's script directory ends with the platform-specific separator.
+-- Keep the bundled alert beside the script so the campaign remains portable
+-- between X-Plane installations and operating systems.
+local SATELLITE_COVERAGE_ALERT_PATH =
+    SCRIPT_DIRECTORY
+    .. "Sounds"
+    .. DIRECTORY_SEPARATOR
+    .. "Satallite_coverage_alert.wav"
+
 -- Approximate flight-planning assumptions
 local ESTIMATED_AVERAGE_SPEED_KT = 180
 local ESTIMATED_FUEL_FLOW_KG_PER_MIN = 2.5
@@ -197,6 +206,7 @@ local satellite_alert_detail = nil
 local satellite_alert_expires_at = nil
 local satellite_alert_severity = nil
 local satellite_proximity = nil
+local satellite_coverage_alert_sound = nil
 
 ------------------------------------------------------------
 -- GENERAL UTILITY FUNCTIONS
@@ -208,6 +218,36 @@ local function set_status(message)
     logMsg(
         "[X2030] " .. message
     )
+end
+
+local function load_campaign_sounds()
+    -- Audio is supplementary: a missing or invalid WAV must never prevent the
+    -- visual satellite warning or the rest of the campaign from operating.
+    local loaded_ok, sound_handle = pcall(
+        load_WAV_file,
+        SATELLITE_COVERAGE_ALERT_PATH
+    )
+
+    if loaded_ok and sound_handle ~= nil then
+        satellite_coverage_alert_sound = sound_handle
+        return
+    end
+
+    logMsg(
+        "[X2030 AUDIO] Could not load satellite coverage alert: "
+        .. SATELLITE_COVERAGE_ALERT_PATH
+    )
+end
+
+local function play_satellite_coverage_alert()
+    if satellite_coverage_alert_sound == nil then
+        return
+    end
+
+    local played_ok = pcall(play_sound, satellite_coverage_alert_sound)
+    if not played_ok then
+        logMsg("[X2030 AUDIO] Could not play satellite coverage alert.")
+    end
 end
 
 local function degrees_to_radians(degrees)
@@ -1265,6 +1305,9 @@ local function update_satellite_surveillance()
 
     local source_changed = not satellite_source_is_still_covered(coverage)
     if source_changed then
+        -- This branch runs once when entering coverage or moving directly to a
+        -- different surveillance source, rather than on every update cycle.
+        play_satellite_coverage_alert()
         set_satellite_alert(
             "SATELLITE COVERAGE AREA",
             coverage.class .. " surveillance near " .. coverage.icao
@@ -2246,6 +2289,8 @@ end
 do_often("xoof_update()")
 do_every_draw("xoof_draw()")
 do_on_exit("xoof_save_before_exit()")
+
+load_campaign_sounds()
 
 if load_valid_land_airports() then
     initialise_departure_airport()
