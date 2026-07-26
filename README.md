@@ -1,10 +1,3 @@
-HOW TO PLAY
-download current release file 
-extract and add X2030.lua to FlyWithLua Scripts folder as follows:
-X-Plane 12 > Resources > plugins > FlyWithLua > Scripts
-*you will need to have FlyWithLua Plugin installed first
-Start Xplane, choose Cirrus Vision SF50 and follow onscreen instructions
-
 ## How to Play
 
 1. Download the latest release file.
