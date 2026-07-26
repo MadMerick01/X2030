@@ -62,7 +62,10 @@ local SATELLITE_CHECK_MAX_SECONDS = 30
 local SATELLITE_LOCK_MIN_SECONDS = 20
 local SATELLITE_LOCK_MAX_SECONDS = 30
 local SATELLITE_STRIKE_COOLDOWN_SECONDS = 60
-local SATELLITE_MESSAGE_SECONDS = 10
+local SATELLITE_TRANSITION_MESSAGE_SECONDS = 6
+local SATELLITE_CLEARED_MESSAGE_SECONDS = 5
+local SATELLITE_STRIKE_MESSAGE_SECONDS = 12
+local SATELLITE_NEAR_COVERAGE_NM = 10
 local METRES_PER_FOOT = 0.3048
 
 -- Approximate flight-planning assumptions
@@ -75,6 +78,11 @@ local DEPARTURE_FUEL_ALLOWANCE_KG = 8
 local DISPLAY_PANEL_COLOR = { 0.03, 0.06, 0.09, 0.82 }
 local DISPLAY_ACCENT_COLOR = { 0.10, 0.75, 0.90, 0.95 }
 local DISPLAY_TEXT_COLOR = { 1.00, 1.00, 1.00, 1.00 }
+local DISPLAY_MUTED_COLOR = { 0.60, 0.72, 0.76, 0.95 }
+local DISPLAY_SUCCESS_COLOR = { 0.35, 0.90, 0.45, 1.00 }
+local DISPLAY_CAUTION_COLOR = { 1.00, 0.70, 0.18, 1.00 }
+local DISPLAY_DANGER_COLOR = { 0.95, 0.25, 0.20, 1.00 }
+local DISPLAY_CRITICAL_COLOR = { 1.00, 0.42, 0.16, 1.00 }
 
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
@@ -187,6 +195,8 @@ local satellite_next_event_time = nil
 local satellite_alert_title = nil
 local satellite_alert_detail = nil
 local satellite_alert_expires_at = nil
+local satellite_alert_severity = nil
+local satellite_proximity = nil
 
 ------------------------------------------------------------
 -- GENERAL UTILITY FUNCTIONS
@@ -846,6 +856,8 @@ local function load_valid_land_airports()
     local current_airport_is_land = false
     local current_airport_has_runway = false
     local current_longest_runway_metres = nil
+    local current_airport_latitude = nil
+    local current_airport_longitude = nil
 
     local function save_current_airport()
         if current_airport_icao ~= nil
@@ -854,7 +866,9 @@ local function load_valid_land_airports()
 
             valid_land_airports[current_airport_icao] = {
                 longest_runway_metres =
-                    current_longest_runway_metres
+                    current_longest_runway_metres,
+                latitude = current_airport_latitude,
+                longitude = current_airport_longitude
             }
         end
     end
@@ -876,6 +890,8 @@ local function load_valid_land_airports()
 
             current_airport_has_runway = false
             current_longest_runway_metres = nil
+            current_airport_latitude = nil
+            current_airport_longitude = nil
 
         elseif row_code == 100
             and current_airport_is_land then
@@ -910,6 +926,12 @@ local function load_valid_land_airports()
 
                     current_longest_runway_metres =
                         runway_length_metres
+                    -- The midpoint of the longest runway is a stable airport
+                    -- position for the deliberately approximate coverage model.
+                    current_airport_latitude =
+                        (first_end_latitude + second_end_latitude) / 2
+                    current_airport_longitude =
+                        (first_end_longitude + second_end_longitude) / 2
                 end
             end
         end
@@ -967,9 +989,15 @@ local function random_satellite_delay(minimum_seconds, maximum_seconds)
     return math.random(minimum_seconds, maximum_seconds)
 end
 
-local function set_satellite_alert(title, detail, duration_seconds)
+local function set_satellite_alert(
+    title,
+    detail,
+    duration_seconds,
+    severity
+)
     satellite_alert_title = title
     satellite_alert_detail = detail
+    satellite_alert_severity = severity or "INFORMATION"
     satellite_alert_expires_at = duration_seconds == nil and nil
         or satellite_event_time + duration_seconds
 
@@ -983,6 +1011,7 @@ local function clear_satellite_alert_if_expired()
         satellite_alert_title = nil
         satellite_alert_detail = nil
         satellite_alert_expires_at = nil
+        satellite_alert_severity = nil
     end
 end
 
@@ -1039,6 +1068,7 @@ local function reset_satellite_tracking(clear_alert)
         satellite_alert_title = nil
         satellite_alert_detail = nil
         satellite_alert_expires_at = nil
+        satellite_alert_severity = nil
     end
 end
 
@@ -1056,37 +1086,78 @@ local function schedule_satellite_acquisition(coverage)
         )
 end
 
+-- Recalculate the distance to every usable surveillance source on each update
+-- tick. The nearest boundary therefore moves with the aircraft even when no
+-- alert is active. Invalid apt.dat coordinates are skipped individually.
 local function current_nearest_satellite_coverage()
-    if nearest_airport == nil
-        or not is_number(nearest_airport_distance_km) then
+    local aircraft_latitude = safe_number(xoof_latitude, nil)
+    local aircraft_longitude = safe_number(xoof_longitude, nil)
 
-        return nil
-    end
-
-    local coverage_class, radius_nm, acquisition_chance, hit_chance =
-        get_satellite_coverage(
-            get_longest_runway_metres(nearest_airport)
-        )
-
-    if coverage_class == nil then
-        return nil
-    end
-
-    local distance_nm = kilometres_to_nautical_miles(
-        nearest_airport_distance_km
-    )
-
-    if not is_number(distance_nm) or distance_nm > radius_nm then
-        return nil
-    end
-
-    return {
-        icao = nearest_airport,
-        class = coverage_class,
-        radius_nm = radius_nm,
-        acquisition_chance = acquisition_chance,
-        hit_chance = hit_chance
+    satellite_proximity = {
+        data_available = false,
+        coverage = nil,
+        nearest_outside = nil
     }
+
+    if aircraft_latitude == nil or aircraft_longitude == nil then
+        return nil
+    end
+
+    local active_coverage = nil
+    local nearest_outside = nil
+
+    for airport_icao, airport_data in pairs(valid_land_airports) do
+        local coverage_class, radius_nm, acquisition_chance, hit_chance =
+            get_satellite_coverage(airport_data.longest_runway_metres)
+        local airport_latitude = safe_number(airport_data.latitude, nil)
+        local airport_longitude = safe_number(airport_data.longitude, nil)
+
+        if coverage_class ~= nil
+            and airport_latitude ~= nil
+            and airport_longitude ~= nil then
+
+            satellite_proximity.data_available = true
+
+            local distance_nm = kilometres_to_nautical_miles(
+                calculate_distance_km(
+                    aircraft_latitude,
+                    aircraft_longitude,
+                    airport_latitude,
+                    airport_longitude
+                )
+            )
+
+            if is_number(distance_nm) then
+                local candidate = {
+                    icao = airport_icao,
+                    class = coverage_class,
+                    radius_nm = radius_nm,
+                    distance_nm = distance_nm,
+                    boundary_distance_nm = math.abs(distance_nm - radius_nm),
+                    acquisition_chance = acquisition_chance,
+                    hit_chance = hit_chance
+                }
+
+                if distance_nm <= radius_nm then
+                    -- Prefer the closest source when coverage areas overlap.
+                    -- This is stable and matches the original nearest-airport
+                    -- threat model while still reporting the live boundary.
+                    if active_coverage == nil
+                        or distance_nm < active_coverage.distance_nm then
+                        active_coverage = candidate
+                    end
+                elseif nearest_outside == nil
+                    or candidate.boundary_distance_nm
+                        < nearest_outside.boundary_distance_nm then
+                    nearest_outside = candidate
+                end
+            end
+        end
+    end
+
+    satellite_proximity.coverage = active_coverage
+    satellite_proximity.nearest_outside = nearest_outside
+    return active_coverage
 end
 
 local function aircraft_is_above_satellite_masking_altitude()
@@ -1133,7 +1204,8 @@ local function update_satellite_surveillance()
             set_satellite_alert(
                 "SATELLITE TRACKING LOST",
                 "Aircraft has cleared the surveillance area.",
-                SATELLITE_MESSAGE_SECONDS
+                SATELLITE_TRANSITION_MESSAGE_SECONDS,
+                "SUCCESS"
             )
             reset_satellite_tracking(false)
             if coverage ~= nil then
@@ -1145,7 +1217,8 @@ local function update_satellite_surveillance()
             set_satellite_alert(
                 "TERRAIN MASKING SUCCESSFUL",
                 "Satellite tracking lost.",
-                SATELLITE_MESSAGE_SECONDS
+                SATELLITE_TRANSITION_MESSAGE_SECONDS,
+                "SUCCESS"
             )
             reset_satellite_tracking(false)
             -- Remember the surrounding coverage so the success message is
@@ -1158,13 +1231,15 @@ local function update_satellite_surveillance()
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - HIT",
                     "Aircraft impact detected.",
-                    SATELLITE_MESSAGE_SECONDS
+                    SATELLITE_STRIKE_MESSAGE_SECONDS,
+                    "DANGER"
                 )
             else
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - NARROW MISS",
                     "High-energy discharge passed close to the aircraft.",
-                    SATELLITE_MESSAGE_SECONDS
+                    SATELLITE_STRIKE_MESSAGE_SECONDS,
+                    "CRITICAL"
                 )
             end
 
@@ -1180,7 +1255,8 @@ local function update_satellite_surveillance()
             set_satellite_alert(
                 "SATELLITE COVERAGE CLEARED",
                 "Aircraft is outside the estimated surveillance area.",
-                SATELLITE_MESSAGE_SECONDS
+                SATELLITE_CLEARED_MESSAGE_SECONDS,
+                "SUCCESS"
             )
         end
         reset_satellite_tracking(false)
@@ -1193,7 +1269,8 @@ local function update_satellite_surveillance()
             "SATELLITE COVERAGE AREA",
             coverage.class .. " surveillance near " .. coverage.icao
                 .. ". Remain below 1,000 ft AGL to reduce exposure.",
-            SATELLITE_MESSAGE_SECONDS
+            SATELLITE_TRANSITION_MESSAGE_SECONDS,
+            "CAUTION"
         )
 
         if above_masking_altitude then
@@ -1233,7 +1310,8 @@ local function update_satellite_surveillance()
             set_satellite_alert(
                 "SATELLITE TRACKING DETECTED",
                 "Descend below 1,000 ft AGL or leave coverage.",
-                nil
+                nil,
+                "DANGER"
             )
         else
             satellite_next_event_time = satellite_event_time
@@ -1812,6 +1890,96 @@ local function set_display_color(color)
     )
 end
 
+local function satellite_severity_color(severity)
+    if severity == "DANGER" then
+        return DISPLAY_DANGER_COLOR
+    elseif severity == "CRITICAL" then
+        return DISPLAY_CRITICAL_COLOR
+    elseif severity == "CAUTION" then
+        return DISPLAY_CAUTION_COLOR
+    elseif severity == "SUCCESS" then
+        return DISPLAY_SUCCESS_COLOR
+    elseif severity == "UNAVAILABLE" then
+        return DISPLAY_MUTED_COLOR
+    end
+
+    return DISPLAY_ACCENT_COLOR
+end
+
+-- Alerts describe a recent event; this status describes the aircraft's current
+-- situation. It is always available as a fallback, so the surveillance area of
+-- the mission computer never becomes blank during quiet portions of a flight.
+local function current_satellite_status()
+    if not is_required_campaign_aircraft_loaded() then
+        return "SATELLITE SURVEILLANCE: STANDBY",
+            "Load the Cirrus Vision SF50 to initialise coverage estimates.",
+            "UNAVAILABLE"
+    end
+
+    if not campaign_started then
+        return "SATELLITE SURVEILLANCE: STANDBY",
+            "Coverage monitoring will begin when the campaign starts.",
+            "UNAVAILABLE"
+    end
+
+    if satellite_proximity == nil
+        or not satellite_proximity.data_available then
+        return "SATELLITE SURVEILLANCE: ESTIMATE UNAVAILABLE",
+            "Insufficient local airport infrastructure data.",
+            "UNAVAILABLE"
+    end
+
+    local coverage = satellite_proximity.coverage
+    if coverage ~= nil then
+        local boundary_nm = math.max(
+            0,
+            safe_number(coverage.boundary_distance_nm, 0)
+        )
+
+        if not aircraft_is_above_satellite_masking_altitude() then
+            return "SATELLITE SURVEILLANCE: TERRAIN MASKING ACTIVE",
+                string.format(
+                    "Within %s coverage near %s | Estimated exit %.1f NM",
+                    coverage.class,
+                    coverage.icao,
+                    boundary_nm
+                ),
+                "SUCCESS"
+        end
+
+        return "SATELLITE COVERAGE: "
+                .. coverage.class .. " - " .. coverage.icao,
+            string.format(
+                "Estimated coverage exit %.1f NM | Surveillance exposure active",
+                boundary_nm
+            ),
+            "CAUTION"
+    end
+
+    local nearest = satellite_proximity.nearest_outside
+    if nearest ~= nil then
+        local boundary_nm = math.max(
+            0,
+            safe_number(nearest.boundary_distance_nm, 0)
+        )
+        local severity = boundary_nm <= SATELLITE_NEAR_COVERAGE_NM
+            and "CAUTION" or "INFORMATION"
+
+        return "SATELLITE SURVEILLANCE: OUTSIDE ESTIMATED COVERAGE",
+            string.format(
+                "Nearest monitored airspace %.1f NM | %s %s coverage",
+                boundary_nm,
+                nearest.icao,
+                nearest.class
+            ),
+            severity
+    end
+
+    return "SATELLITE SURVEILLANCE: ESTIMATE UNAVAILABLE",
+        "No valid surveillance source position is available.",
+        "UNAVAILABLE"
+end
+
 local function draw_display_background(starting_y)
     local panel_left = 24
     local panel_right = 850
@@ -1882,23 +2050,25 @@ function xoof_draw()
         MISSION_BRIEFING_LINE_ONE
     )
 
-    if satellite_alert_title ~= nil then
-        if string.find(satellite_alert_title, "DIRECTED-ENERGY", 1, true)
-            or satellite_alert_title == "SATELLITE TRACKING DETECTED" then
-            set_display_color({ 0.95, 0.25, 0.20, 1.00 })
-        elseif satellite_alert_title == "SATELLITE COVERAGE AREA" then
-            set_display_color({ 1.00, 0.70, 0.18, 1.00 })
-        else
-            set_display_color(DISPLAY_ACCENT_COLOR)
-        end
+    local satellite_title = satellite_alert_title
+    local satellite_detail = satellite_alert_detail
+    local satellite_severity = satellite_alert_severity
+
+    if satellite_title == nil then
+        satellite_title, satellite_detail, satellite_severity =
+            current_satellite_status()
+    end
+
+    if satellite_title ~= nil then
+        set_display_color(satellite_severity_color(satellite_severity))
 
         draw_string_Helvetica_12(
             430,
             starting_y - 85,
-            satellite_alert_title
+            satellite_title
         )
 
-        local alert_detail = satellite_alert_detail or ""
+        local alert_detail = satellite_detail or ""
         if satellite_state == "LOCKED"
             and satellite_next_event_time ~= nil then
 
@@ -1915,6 +2085,10 @@ function xoof_draw()
                 )
         end
 
+        -- Supporting information remains white for readability. Colour is
+        -- reserved for the title so severity is clear without creating a large
+        -- arcade-like block of warning text.
+        set_display_color(DISPLAY_TEXT_COLOR)
         draw_string_Helvetica_12(
             430,
             starting_y - 105,
