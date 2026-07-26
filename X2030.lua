@@ -1,6 +1,6 @@
 -- X2030
--- Prototype 0.5
--- Airport-to-airport fuel system and next-hop suggestions
+-- Prototype 0.6
+-- Airport fuel, next-hop suggestions and satellite surveillance
 
 local PLUGIN_NAME = "2030 - AI Apocalypse"
 local MISSION_BRIEFING_LINE_ONE =
@@ -40,6 +40,30 @@ local POUNDS_PER_KILOGRAM = 2.2046226218
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
+
+-- Satellite surveillance uses the nearest airport's longest runway as a
+-- deliberately simple proxy for population density. All values are grouped
+-- here so play-testing can tune the threat without changing event logic.
+local SATELLITE_MASKING_ALTITUDE_FT = 1000
+local SATELLITE_LIGHT_RUNWAY_MIN_M = 1200
+local SATELLITE_MEDIUM_RUNWAY_MIN_M = 1800
+local SATELLITE_HEAVY_RUNWAY_MIN_M = 2500
+local SATELLITE_LIGHT_RADIUS_NM = 20
+local SATELLITE_MEDIUM_RADIUS_NM = 30
+local SATELLITE_HEAVY_RADIUS_NM = 50
+local SATELLITE_LIGHT_ACQUISITION_CHANCE = 0.05
+local SATELLITE_MEDIUM_ACQUISITION_CHANCE = 0.15
+local SATELLITE_HEAVY_ACQUISITION_CHANCE = 0.35
+local SATELLITE_LIGHT_HIT_CHANCE = 0.20
+local SATELLITE_MEDIUM_HIT_CHANCE = 0.35
+local SATELLITE_HEAVY_HIT_CHANCE = 0.50
+local SATELLITE_CHECK_MIN_SECONDS = 20
+local SATELLITE_CHECK_MAX_SECONDS = 30
+local SATELLITE_LOCK_MIN_SECONDS = 20
+local SATELLITE_LOCK_MAX_SECONDS = 30
+local SATELLITE_STRIKE_COOLDOWN_SECONDS = 60
+local SATELLITE_MESSAGE_SECONDS = 10
+local METRES_PER_FOOT = 0.3048
 
 -- Approximate flight-planning assumptions
 local ESTIMATED_AVERAGE_SPEED_KT = 180
@@ -89,6 +113,24 @@ dataref(
     "readonly"
 )
 
+dataref(
+    "xoof_altitude_agl_metres",
+    "sim/flightmodel/position/y_agl",
+    "readonly"
+)
+
+dataref(
+    "xoof_sim_running_time",
+    "sim/time/total_running_time_sec",
+    "readonly"
+)
+
+dataref(
+    "xoof_sim_paused",
+    "sim/time/paused",
+    "readonly"
+)
+
 -- X-Plane publishes the configured aircraft fuel capacity in pounds.
 dataref(
     "xoof_aircraft_fuel_capacity_lb",
@@ -130,6 +172,21 @@ local status_message =
     "Initialising airport detection..."
 local last_saved_fuel_signature = nil
 local last_fuel_transfer = nil
+
+-- Satellite event time advances only while the simulator is not paused. This
+-- prevents a tracking countdown expiring while the player is in a menu.
+local satellite_event_time = 0
+local satellite_last_sim_time = nil
+local satellite_state = "IDLE"
+local satellite_source_icao = nil
+local satellite_source_class = nil
+local satellite_source_radius_nm = 0
+local satellite_acquisition_chance = 0
+local satellite_hit_chance = 0
+local satellite_next_event_time = nil
+local satellite_alert_title = nil
+local satellite_alert_detail = nil
+local satellite_alert_expires_at = nil
 
 ------------------------------------------------------------
 -- GENERAL UTILITY FUNCTIONS
@@ -903,6 +960,292 @@ local function get_longest_runway_metres(icao)
 end
 
 ------------------------------------------------------------
+-- SATELLITE SURVEILLANCE
+------------------------------------------------------------
+
+local function random_satellite_delay(minimum_seconds, maximum_seconds)
+    return math.random(minimum_seconds, maximum_seconds)
+end
+
+local function set_satellite_alert(title, detail, duration_seconds)
+    satellite_alert_title = title
+    satellite_alert_detail = detail
+    satellite_alert_expires_at = duration_seconds == nil and nil
+        or satellite_event_time + duration_seconds
+
+    logMsg("[X2030 SATELLITE] " .. title .. " | " .. detail)
+end
+
+local function clear_satellite_alert_if_expired()
+    if satellite_alert_expires_at ~= nil
+        and satellite_event_time >= satellite_alert_expires_at then
+
+        satellite_alert_title = nil
+        satellite_alert_detail = nil
+        satellite_alert_expires_at = nil
+    end
+end
+
+local function advance_satellite_event_time()
+    local current_time = safe_number(xoof_sim_running_time, nil)
+
+    if current_time == nil then
+        satellite_last_sim_time = nil
+        return
+    end
+
+    if satellite_last_sim_time ~= nil and xoof_sim_paused == 0 then
+        local elapsed = current_time - satellite_last_sim_time
+        if elapsed > 0 then
+            -- A cap avoids a large timer jump after a scenery load or system
+            -- sleep while still allowing normal accelerated simulator time.
+            satellite_event_time = satellite_event_time + math.min(elapsed, 5)
+        end
+    end
+
+    satellite_last_sim_time = current_time
+end
+
+local function get_satellite_coverage(runway_length_m)
+    local runway = safe_number(runway_length_m, nil)
+
+    if runway == nil or runway < SATELLITE_LIGHT_RUNWAY_MIN_M then
+        return nil
+    elseif runway < SATELLITE_MEDIUM_RUNWAY_MIN_M then
+        return "LIGHT", SATELLITE_LIGHT_RADIUS_NM,
+            SATELLITE_LIGHT_ACQUISITION_CHANCE,
+            SATELLITE_LIGHT_HIT_CHANCE
+    elseif runway < SATELLITE_HEAVY_RUNWAY_MIN_M then
+        return "MEDIUM", SATELLITE_MEDIUM_RADIUS_NM,
+            SATELLITE_MEDIUM_ACQUISITION_CHANCE,
+            SATELLITE_MEDIUM_HIT_CHANCE
+    end
+
+    return "HEAVY", SATELLITE_HEAVY_RADIUS_NM,
+        SATELLITE_HEAVY_ACQUISITION_CHANCE,
+        SATELLITE_HEAVY_HIT_CHANCE
+end
+
+local function reset_satellite_tracking(clear_alert)
+    satellite_state = "IDLE"
+    satellite_source_icao = nil
+    satellite_source_class = nil
+    satellite_source_radius_nm = 0
+    satellite_acquisition_chance = 0
+    satellite_hit_chance = 0
+    satellite_next_event_time = nil
+
+    if clear_alert then
+        satellite_alert_title = nil
+        satellite_alert_detail = nil
+        satellite_alert_expires_at = nil
+    end
+end
+
+local function schedule_satellite_acquisition(coverage)
+    satellite_state = "WAITING"
+    satellite_source_icao = coverage.icao
+    satellite_source_class = coverage.class
+    satellite_source_radius_nm = coverage.radius_nm
+    satellite_acquisition_chance = coverage.acquisition_chance
+    satellite_hit_chance = coverage.hit_chance
+    satellite_next_event_time = satellite_event_time
+        + random_satellite_delay(
+            SATELLITE_CHECK_MIN_SECONDS,
+            SATELLITE_CHECK_MAX_SECONDS
+        )
+end
+
+local function current_nearest_satellite_coverage()
+    if nearest_airport == nil
+        or not is_number(nearest_airport_distance_km) then
+
+        return nil
+    end
+
+    local coverage_class, radius_nm, acquisition_chance, hit_chance =
+        get_satellite_coverage(
+            get_longest_runway_metres(nearest_airport)
+        )
+
+    if coverage_class == nil then
+        return nil
+    end
+
+    local distance_nm = kilometres_to_nautical_miles(
+        nearest_airport_distance_km
+    )
+
+    if not is_number(distance_nm) or distance_nm > radius_nm then
+        return nil
+    end
+
+    return {
+        icao = nearest_airport,
+        class = coverage_class,
+        radius_nm = radius_nm,
+        acquisition_chance = acquisition_chance,
+        hit_chance = hit_chance
+    }
+end
+
+local function aircraft_is_above_satellite_masking_altitude()
+    local altitude_metres = safe_number(xoof_altitude_agl_metres, nil)
+    return altitude_metres ~= nil
+        and altitude_metres
+            > SATELLITE_MASKING_ALTITUDE_FT * METRES_PER_FOOT
+end
+
+local function satellite_source_is_still_covered(coverage)
+    return coverage ~= nil
+        and coverage.icao == satellite_source_icao
+        and coverage.class == satellite_source_class
+end
+
+local function update_satellite_surveillance()
+    advance_satellite_event_time()
+    clear_satellite_alert_if_expired()
+
+    -- Refresh the nearest nav airport before evaluating its cached runway.
+    -- Invalid nav or apt.dat values simply result in no surveillance source.
+    update_nearest_airport()
+    local coverage = current_nearest_satellite_coverage()
+    local airborne = xoof_on_ground == 0
+    local above_masking_altitude =
+        aircraft_is_above_satellite_masking_altitude()
+
+    if not airborne then
+        reset_satellite_tracking(true)
+        return
+    end
+
+    if satellite_state == "COOLDOWN" then
+        if coverage == nil then
+            reset_satellite_tracking(false)
+        elseif satellite_event_time >= satellite_next_event_time then
+            schedule_satellite_acquisition(coverage)
+        end
+        return
+    end
+
+    if satellite_state == "LOCKED" then
+        if not satellite_source_is_still_covered(coverage) then
+            set_satellite_alert(
+                "SATELLITE TRACKING LOST",
+                "Aircraft has cleared the surveillance area.",
+                SATELLITE_MESSAGE_SECONDS
+            )
+            reset_satellite_tracking(false)
+            if coverage ~= nil then
+                satellite_source_icao = coverage.icao
+                satellite_source_class = coverage.class
+            end
+            return
+        elseif not above_masking_altitude then
+            set_satellite_alert(
+                "TERRAIN MASKING SUCCESSFUL",
+                "Satellite tracking lost.",
+                SATELLITE_MESSAGE_SECONDS
+            )
+            reset_satellite_tracking(false)
+            -- Remember the surrounding coverage so the success message is
+            -- not immediately replaced by another zone-entry advisory.
+            satellite_source_icao = coverage.icao
+            satellite_source_class = coverage.class
+            return
+        elseif satellite_event_time >= satellite_next_event_time then
+            if math.random() < satellite_hit_chance then
+                set_satellite_alert(
+                    "DIRECTED-ENERGY STRIKE - HIT",
+                    "Aircraft impact detected.",
+                    SATELLITE_MESSAGE_SECONDS
+                )
+            else
+                set_satellite_alert(
+                    "DIRECTED-ENERGY STRIKE - NARROW MISS",
+                    "High-energy discharge passed close to the aircraft.",
+                    SATELLITE_MESSAGE_SECONDS
+                )
+            end
+
+            satellite_state = "COOLDOWN"
+            satellite_next_event_time = satellite_event_time
+                + SATELLITE_STRIKE_COOLDOWN_SECONDS
+        end
+        return
+    end
+
+    if coverage == nil then
+        if satellite_source_icao ~= nil then
+            set_satellite_alert(
+                "SATELLITE COVERAGE CLEARED",
+                "Aircraft is outside the estimated surveillance area.",
+                SATELLITE_MESSAGE_SECONDS
+            )
+        end
+        reset_satellite_tracking(false)
+        return
+    end
+
+    local source_changed = not satellite_source_is_still_covered(coverage)
+    if source_changed then
+        set_satellite_alert(
+            "SATELLITE COVERAGE AREA",
+            coverage.class .. " surveillance near " .. coverage.icao
+                .. ". Remain below 1,000 ft AGL to reduce exposure.",
+            SATELLITE_MESSAGE_SECONDS
+        )
+
+        if above_masking_altitude then
+            schedule_satellite_acquisition(coverage)
+        else
+            reset_satellite_tracking(false)
+            satellite_source_icao = coverage.icao
+            satellite_source_class = coverage.class
+        end
+        return
+    end
+
+    if not above_masking_altitude then
+        if satellite_state == "WAITING" then
+            reset_satellite_tracking(false)
+            satellite_source_icao = coverage.icao
+            satellite_source_class = coverage.class
+        end
+        return
+    end
+
+    if satellite_state == "IDLE" then
+        schedule_satellite_acquisition(coverage)
+        return
+    end
+
+    if satellite_state == "WAITING"
+        and satellite_event_time >= satellite_next_event_time then
+
+        if math.random() < satellite_acquisition_chance then
+            satellite_state = "LOCKED"
+            satellite_next_event_time = satellite_event_time
+                + random_satellite_delay(
+                    SATELLITE_LOCK_MIN_SECONDS,
+                    SATELLITE_LOCK_MAX_SECONDS
+                )
+            set_satellite_alert(
+                "SATELLITE TRACKING DETECTED",
+                "Descend below 1,000 ft AGL or leave coverage.",
+                nil
+            )
+        else
+            satellite_next_event_time = satellite_event_time
+                + random_satellite_delay(
+                    SATELLITE_CHECK_MIN_SECONDS,
+                    SATELLITE_CHECK_MAX_SECONDS
+                )
+        end
+    end
+end
+
+------------------------------------------------------------
 -- NEXT-HOP AIRPORT SEARCH
 ------------------------------------------------------------
 
@@ -1286,17 +1629,21 @@ function xoof_update()
     -- so a mid-session change can never save fuel or advance the SF50 campaign.
     if not is_required_campaign_aircraft_loaded() then
         suggested_airports = {}
+        reset_satellite_tracking(true)
         return
     end
 
     -- Do not advance campaign state until a new NZMO start or a valid saved
     -- campaign at the aircraft's present airport has been established.
     if not campaign_started then
+        reset_satellite_tracking(true)
         return
     end
 
     -- Persist simulator or plugin fuel changes in every operating state.
     save_fuel_if_changed()
+
+    update_satellite_surveillance()
 
     local engine_is_running =
         xoof_engine_running[0] == 1
@@ -1535,6 +1882,47 @@ function xoof_draw()
         MISSION_BRIEFING_LINE_ONE
     )
 
+    if satellite_alert_title ~= nil then
+        if string.find(satellite_alert_title, "DIRECTED-ENERGY", 1, true)
+            or satellite_alert_title == "SATELLITE TRACKING DETECTED" then
+            set_display_color({ 0.95, 0.25, 0.20, 1.00 })
+        elseif satellite_alert_title == "SATELLITE COVERAGE AREA" then
+            set_display_color({ 1.00, 0.70, 0.18, 1.00 })
+        else
+            set_display_color(DISPLAY_ACCENT_COLOR)
+        end
+
+        draw_string_Helvetica_12(
+            430,
+            starting_y - 85,
+            satellite_alert_title
+        )
+
+        local alert_detail = satellite_alert_detail or ""
+        if satellite_state == "LOCKED"
+            and satellite_next_event_time ~= nil then
+
+            alert_detail = alert_detail
+                .. string.format(
+                    " Tracking solution: %d seconds.",
+                    math.max(
+                        0,
+                        math.ceil(
+                            satellite_next_event_time
+                            - satellite_event_time
+                        )
+                    )
+                )
+        end
+
+        draw_string_Helvetica_12(
+            430,
+            starting_y - 105,
+            alert_detail
+        )
+        set_display_color(DISPLAY_TEXT_COLOR)
+    end
+
     draw_string_Helvetica_12(
         40,
         starting_y - 45,
@@ -1696,5 +2084,5 @@ end
 
 logMsg(
     "[X2030] "
-    .. "Prototype 0.5 dynamic airport fuel system loaded."
+    .. "Prototype 0.6 satellite surveillance system loaded."
 )
