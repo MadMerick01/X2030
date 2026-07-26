@@ -1,5 +1,5 @@
 -- X2030
--- Prototype 0.4
+-- Prototype 0.5
 -- Airport-to-airport fuel system and next-hop suggestions
 
 local PLUGIN_NAME = "2030 - AI Apocalypse"
@@ -34,11 +34,9 @@ local LEGACY_CAMPAIGN_SAVE_PATH =
 -- GAME SETTINGS
 ------------------------------------------------------------
 
--- Depot allocations range from 20 kg to 160 kg. The midpoint (and therefore
--- the intended average across airports) is 90 kg.
-local AVERAGE_AIRPORT_FUEL_KG = 90
-local AIRPORT_FUEL_VARIATION_KG = 70
 local INITIAL_CAMPAIGN_FUEL_KG = 40
+local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
+local POUNDS_PER_KILOGRAM = 2.2046226218
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -91,6 +89,13 @@ dataref(
     "readonly"
 )
 
+-- X-Plane publishes the configured aircraft fuel capacity in pounds.
+dataref(
+    "xoof_aircraft_fuel_capacity_lb",
+    "sim/aircraft/weight/acf_m_fuel_tot",
+    "readonly"
+)
+
 xoof_engine_running = dataref_table(
     "sim/flightmodel/engine/ENGN_running"
 )
@@ -113,7 +118,8 @@ local nearest_airport_name = nil
 local nearest_airport_distance_km = nil
 
 local suggested_airports = {}
-local airport_fuel_allocations = {}
+local airport_fuel_records = {}
+local airport_fuel_access_counter = 0
 -- Airport identifiers confirmed as land airports. Each entry also carries
 -- the longest conventional runway found in apt.dat so recommendation data
 -- remains available without another file scan.
@@ -123,6 +129,7 @@ local airport_database_loaded = false
 local status_message =
     "Initialising airport detection..."
 local last_saved_fuel_signature = nil
+local last_fuel_transfer = nil
 
 ------------------------------------------------------------
 -- GENERAL UTILITY FUNCTIONS
@@ -150,6 +157,9 @@ end
 
 local function is_number(value)
     return type(value) == "number"
+        and value == value
+        and value ~= math.huge
+        and value ~= -math.huge
 end
 
 local function number_or_zero(value)
@@ -158,6 +168,25 @@ local function number_or_zero(value)
     end
 
     return 0
+end
+
+local function safe_number(value, fallback)
+    local converted = tonumber(value)
+
+    if converted == nil
+        or converted ~= converted
+        or converted == math.huge
+        or converted == -math.huge then
+
+        return fallback
+    end
+
+    return converted
+end
+
+local function clamp(value, minimum, maximum)
+    local safe_value = safe_number(value, minimum)
+    return math.max(minimum, math.min(maximum, safe_value))
 end
 
 local function is_required_campaign_aircraft_loaded()
@@ -185,39 +214,187 @@ local function is_valid_airport_identifier(value)
         and #value <= 8
 end
 
--- Produce a stable, airport-specific allocation rather than rolling a new
--- amount every time the suggestion list is refreshed. This guarantees that
--- the quantity advertised before departure is the quantity delivered after
--- landing, including when FlyWithLua reloads the script between those events.
-local function get_airport_fuel_allocation(airport_icao)
+------------------------------------------------------------
+-- RECENT AIRPORT FUEL MEMORY
+------------------------------------------------------------
+
+local function get_airport_fuel_record(airport_icao)
     if not is_valid_airport_identifier(airport_icao) then
         return nil
     end
 
-    if is_number(airport_fuel_allocations[airport_icao]) then
-        return airport_fuel_allocations[airport_icao]
+    return airport_fuel_records[airport_icao]
+end
+
+local function touch_airport_fuel_record(airport_icao)
+    local record = get_airport_fuel_record(airport_icao)
+    if record == nil then
+        return nil
     end
 
-    local minimum_fuel =
-        AVERAGE_AIRPORT_FUEL_KG - AIRPORT_FUEL_VARIATION_KG
-    local possible_amounts =
-        (AIRPORT_FUEL_VARIATION_KG * 2) + 1
-    local airport_hash = 0
+    airport_fuel_access_counter = airport_fuel_access_counter + 1
+    record.last_access = airport_fuel_access_counter
+    return record
+end
 
-    -- The simple rolling hash is deterministic in Lua 5.1 and distributes
-    -- normal ICAO identifiers throughout the complete 20--160 kg range.
-    for character_index = 1, #airport_icao do
-        airport_hash =
-            (
-                airport_hash * 31
-                + string.byte(airport_icao, character_index)
-            ) % possible_amounts
+local function build_protected_airport_set()
+    local protected_icaos = {}
+
+    if is_valid_airport_identifier(departure_airport) then
+        protected_icaos[departure_airport] = true
     end
 
-    local allocation = minimum_fuel + airport_hash
-    airport_fuel_allocations[airport_icao] = allocation
+    for index = 1, 3 do
+        local suggestion = suggested_airports[index]
+        if suggestion ~= nil
+            and is_valid_airport_identifier(suggestion.icao) then
+            protected_icaos[suggestion.icao] = true
+        end
+    end
 
-    return allocation
+    return protected_icaos
+end
+
+
+local function remove_oldest_airport_fuel_record(protected_icaos)
+    protected_icaos = type(protected_icaos) == "table"
+        and protected_icaos or {}
+
+    local oldest_icao = nil
+    local oldest_access = math.huge
+
+    local function consider_record(icao, record, allow_protected)
+        local is_current = icao == departure_airport
+        if is_current or (not allow_protected and protected_icaos[icao]) then
+            return
+        end
+
+        local access = safe_number(record.last_access, -1)
+        if access < oldest_access then
+            oldest_icao = icao
+            oldest_access = access
+        end
+    end
+
+    for icao, record in pairs(airport_fuel_records) do
+        consider_record(icao, record, false)
+    end
+
+    -- If suggestions occupy every eligible slot, preserve the current airport
+    -- but permit the oldest suggestion to be forgotten.
+    if oldest_icao == nil then
+        for icao, record in pairs(airport_fuel_records) do
+            consider_record(icao, record, true)
+        end
+    end
+
+    if oldest_icao ~= nil then
+        airport_fuel_records[oldest_icao] = nil
+        logMsg("[X2030 FUEL] Removed old record " .. oldest_icao)
+        return true
+    end
+
+    return false
+end
+
+local function classify_airport_by_runway(runway_length_m)
+    local runway = safe_number(runway_length_m, nil)
+
+    if runway == nil or runway <= 0 then
+        return "UNKNOWN", 55, 150, 0.25, 0.05
+    elseif runway < 700 then
+        return "TINY", 180, 250, 0.10, 0.10
+    elseif runway < 1000 then
+        return "SMALL", 140, 220, 0.15, 0.10
+    elseif runway < 1500 then
+        return "REGIONAL", 90, 175, 0.25, 0.05
+    elseif runway < 2200 then
+        return "LARGE REGIONAL", 40, 120, 0.45, 0.02
+    end
+
+    return "MAJOR", 0, 55, 0.70, 0
+end
+
+
+local function generate_initial_airport_fuel(airport_icao, runway_length_m)
+    local size_class, normal_minimum, normal_maximum,
+        depleted_chance, high_reserve_chance =
+        classify_airport_by_runway(runway_length_m)
+
+    local fuel_kg
+    if math.random() < depleted_chance then
+        fuel_kg = 0
+    elseif math.random() < high_reserve_chance then
+        if size_class == "TINY" then
+            fuel_kg = math.random(220, 280)
+        else
+            fuel_kg = math.random(180, 250)
+        end
+    else
+        fuel_kg = math.random(normal_minimum, normal_maximum)
+    end
+
+    return fuel_kg, size_class
+end
+
+local function get_or_create_airport_fuel(airport_icao, runway_length_m)
+    if not is_valid_airport_identifier(airport_icao) then
+        logMsg("[X2030 FUEL] Invalid airport identifier; fuel unavailable")
+        return nil
+    end
+
+    local existing = get_airport_fuel_record(airport_icao)
+    if existing ~= nil then
+        local stored_fuel = safe_number(existing.fuel_kg, nil)
+        if stored_fuel == nil or stored_fuel < 0 then
+            logMsg("[X2030 FUEL] Invalid stored fuel for "
+                .. airport_icao .. "; using 0 kg")
+            stored_fuel = 0
+        end
+
+        local initial_fuel = safe_number(
+            existing.initial_fuel_kg, stored_fuel)
+        initial_fuel = math.max(stored_fuel, initial_fuel, 0)
+        existing.initial_fuel_kg = initial_fuel
+        existing.fuel_kg = clamp(stored_fuel, 0, initial_fuel)
+        touch_airport_fuel_record(airport_icao)
+        return existing
+    end
+
+    local record_count = 0
+    for _ in pairs(airport_fuel_records) do
+        record_count = record_count + 1
+    end
+
+    while record_count >= MAX_RECENT_AIRPORT_FUEL_RECORDS do
+        if not remove_oldest_airport_fuel_record(
+            build_protected_airport_set()) then
+            return nil
+        end
+        record_count = record_count - 1
+    end
+
+    local fuel_kg, size_class = generate_initial_airport_fuel(
+        airport_icao, runway_length_m)
+    airport_fuel_access_counter = airport_fuel_access_counter + 1
+
+    local record = {
+        icao = airport_icao,
+        fuel_kg = fuel_kg,
+        initial_fuel_kg = fuel_kg,
+        runway_length_m = safe_number(runway_length_m, nil),
+        size_class = size_class,
+        last_access = airport_fuel_access_counter
+    }
+    airport_fuel_records[airport_icao] = record
+
+    local runway_text = record.runway_length_m == nil and "unknown"
+        or string.format("%.0f", record.runway_length_m)
+    logMsg(string.format(
+        "[X2030 FUEL] Initialised %s: %s, runway %s m, fuel %d kg",
+        airport_icao, size_class, runway_text, fuel_kg))
+
+    return record
 end
 
 ------------------------------------------------------------
@@ -828,10 +1005,6 @@ local function refresh_airport_suggestions()
                         runway_length_metres =
                             get_longest_runway_metres(
                                 airport_icao
-                            ),
-                        available_fuel =
-                            get_airport_fuel_allocation(
-                                airport_icao
                             )
                     }
                 )
@@ -842,6 +1015,19 @@ local function refresh_airport_suggestions()
             XPLMGetNextNavAid(
                 nav_reference
             )
+    end
+
+    -- Only the final three candidates enter recent-airport memory. Creating
+    -- records during the full nav-aid scan would evict useful airports before
+    -- the player ever saw them.
+    for index = 1, #suggested_airports do
+        local airport = suggested_airports[index]
+        local record = get_or_create_airport_fuel(
+            airport.icao, airport.runway_length_metres)
+        airport.available_fuel = record ~= nil
+            and safe_number(record.fuel_kg, 0) or 0
+        airport.size_class = record ~= nil
+            and record.size_class or "UNKNOWN"
     end
 
     logMsg(
@@ -868,6 +1054,19 @@ local function get_total_fuel()
     return total_fuel
 end
 
+local function get_aircraft_remaining_fuel_capacity_kg()
+    local capacity_lb = safe_number(xoof_aircraft_fuel_capacity_lb, nil)
+    local current_fuel = math.max(0, safe_number(get_total_fuel(), 0))
+
+    if capacity_lb == nil or capacity_lb <= 0 then
+        logMsg("[X2030 FUEL] Aircraft fuel capacity unavailable")
+        return nil
+    end
+
+    local capacity_kg = capacity_lb / POUNDS_PER_KILOGRAM
+    return math.max(0, capacity_kg - current_fuel), capacity_kg
+end
+
 local function add_balanced_fuel(fuel_amount_kg)
     if not is_number(fuel_amount_kg)
         or fuel_amount_kg < 0 then
@@ -888,6 +1087,52 @@ local function add_balanced_fuel(fuel_amount_kg)
         fuel_per_tank_kg
 
     return true
+end
+
+local function transfer_airport_fuel_to_aircraft(airport_icao)
+    local record = get_or_create_airport_fuel(
+        airport_icao, get_longest_runway_metres(airport_icao))
+    if record == nil then
+        return nil
+    end
+
+    touch_airport_fuel_record(airport_icao)
+    local airport_fuel_before = math.max(0,
+        safe_number(record.fuel_kg, 0))
+    local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
+
+    if remaining_capacity == nil then
+        return nil
+    end
+
+    local transferred = clamp(
+        math.min(airport_fuel_before, remaining_capacity),
+        0, remaining_capacity)
+
+    if transferred > 0 and not add_balanced_fuel(transferred) then
+        return nil
+    end
+
+    record.fuel_kg = math.max(0, airport_fuel_before - transferred)
+    touch_airport_fuel_record(airport_icao)
+
+    if transferred > 0 then
+        logMsg(string.format("[X2030 FUEL] Transferred %.0f kg from %s",
+            transferred, airport_icao))
+        logMsg(string.format("[X2030 FUEL] %s remaining fuel: %.0f kg",
+            airport_icao, record.fuel_kg))
+    elseif airport_fuel_before <= 0 then
+        logMsg("[X2030 FUEL] No fuel available at " .. airport_icao)
+    end
+
+    return {
+        icao = airport_icao,
+        depot_before_kg = airport_fuel_before,
+        transferred_kg = transferred,
+        depot_remaining_kg = record.fuel_kg,
+        aircraft_total_kg = get_total_fuel(),
+        aircraft_full = remaining_capacity <= transferred + 0.01
+    }
 end
 
 -- A new campaign begins with an exact, deliberately scarce fuel load. Clear
@@ -981,6 +1226,10 @@ local function initialise_departure_airport()
         departure_airport = saved_campaign.current_airport
         campaign_started = true
         restore_saved_fuel(saved_campaign.fuel_tanks)
+        get_or_create_airport_fuel(
+            departure_airport,
+            get_longest_runway_metres(departure_airport)
+        )
 
         set_status(
             "Campaign resumed at "
@@ -1008,6 +1257,10 @@ local function initialise_departure_airport()
         CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
     set_initial_campaign_fuel()
+    get_or_create_airport_fuel(
+        departure_airport,
+        get_longest_runway_metres(departure_airport)
+    )
 
     refresh_airport_suggestions()
 
@@ -1128,6 +1381,8 @@ function xoof_update()
         ==
         departure_airport then
 
+        touch_airport_fuel_record(nearest_airport)
+
         local return_was_saved = save_campaign_progress()
 
         if return_was_saved then
@@ -1151,16 +1406,18 @@ function xoof_update()
         return
     end
 
-    local delivered_fuel_kg =
-        get_airport_fuel_allocation(nearest_airport)
+    local transfer_result =
+        transfer_airport_fuel_to_aircraft(nearest_airport)
 
-    if not add_balanced_fuel(delivered_fuel_kg) then
+    if transfer_result == nil then
         set_status(
-            "Airport fuel allocation unavailable. No fuel delivered."
+            "Airport depot or aircraft capacity unavailable. No fuel delivered."
         )
 
         return
     end
+
+    last_fuel_transfer = transfer_result
 
     local arrival_airport =
         nearest_airport
@@ -1169,13 +1426,18 @@ function xoof_update()
         arrival_airport
 
     if save_campaign_progress() then
-        set_status(
-            "Arrived "
-            .. arrival_airport
-            .. ". Fuel delivered: "
-            .. tostring(delivered_fuel_kg)
-            .. " kg. Progress saved."
-        )
+        if transfer_result.depot_before_kg <= 0 then
+            set_status("Arrived " .. arrival_airport
+                .. ". DEPOT DEPLETED. NO TRANSFER AVAILABLE.")
+        elseif transfer_result.transferred_kg <= 0 then
+            set_status("Arrived " .. arrival_airport
+                .. ". Aircraft tanks full. Depot unchanged.")
+        else
+            set_status(string.format(
+                "Arrived %s. Transferred %.0f kg; depot %.0f kg. Progress saved.",
+                arrival_airport, transfer_result.transferred_kg,
+                transfer_result.depot_remaining_kg))
+        end
     else
         set_status(
             "Arrived "
@@ -1243,6 +1505,29 @@ function xoof_draw()
         starting_y,
         PLUGIN_NAME
     )
+
+    if last_fuel_transfer ~= nil then
+        local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
+            and "DEPOT DEPLETED"
+            or string.format("DEPOT REMAINING %.0f KG",
+                last_fuel_transfer.depot_remaining_kg)
+        local tank_state = last_fuel_transfer.aircraft_full
+            and "AIRCRAFT TANKS FULL"
+            or string.format("AIRCRAFT TOTAL %.0f KG",
+                last_fuel_transfer.aircraft_total_kg)
+
+        draw_string_Helvetica_12(
+            430,
+            starting_y - 125,
+            string.format(
+                "DEPOT VERIFIED %.0f KG | TRANSFERRED %.0f KG | %s | %s",
+                last_fuel_transfer.depot_before_kg,
+                last_fuel_transfer.transferred_kg,
+                depot_state,
+                tank_state
+            )
+        )
+    end
 
     draw_string_Helvetica_12(
         40,
@@ -1333,6 +1618,27 @@ function xoof_draw()
                 affordability = "LOW FUEL"
             end
 
+            local reserve_description = ""
+            if airport.size_class == "MAJOR"
+                and number_or_zero(airport.available_fuel) < 55 then
+                reserve_description = " | LONG RUNWAY / LOW RESERVE"
+            elseif airport.size_class == "TINY"
+                and number_or_zero(airport.available_fuel) >= 180 then
+                reserve_description = " | SHORT RUNWAY / HIGH RESERVE"
+            end
+
+            local depot_fuel = math.max(0,
+                number_or_zero(airport.available_fuel))
+            if depot_fuel == 0 then
+                set_display_color({ 0.95, 0.25, 0.20, 1.00 })
+            elseif depot_fuel < 120 then
+                set_display_color({ 1.00, 0.70, 0.18, 1.00 })
+            elseif depot_fuel < 180 then
+                set_display_color({ 0.35, 0.90, 0.45, 1.00 })
+            else
+                set_display_color(DISPLAY_ACCENT_COLOR)
+            end
+
             draw_string_Helvetica_12(
                 40,
                 line_y,
@@ -1340,17 +1646,19 @@ function xoof_draw()
                     "%d. %s | %.0f NM | "
                     .. "HDG %03.0f | "
                     .. "EST %.0f KG | "
-                    .. "%s | DEPOT %.0f KG | %s",
+                    .. "%s | DEPOT %.0f KG | %s%s",
                     index,
                     airport.icao,
                     number_or_zero(airport.distance_nm),
                     number_or_zero(airport.heading),
                     number_or_zero(airport.required_fuel),
                     runway_length_text,
-                    number_or_zero(airport.available_fuel),
-                    affordability
+                    depot_fuel,
+                    affordability,
+                    reserve_description
                 )
             )
+            set_display_color(DISPLAY_TEXT_COLOR)
         else
             draw_string_Helvetica_12(
                 40,
@@ -1388,5 +1696,5 @@ end
 
 logMsg(
     "[X2030] "
-    .. "Prototype 0.4 ground information and fuel save loaded."
+    .. "Prototype 0.5 dynamic airport fuel system loaded."
 )
