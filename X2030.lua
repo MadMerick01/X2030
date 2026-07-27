@@ -98,20 +98,9 @@ local ESTIMATED_AVERAGE_SPEED_KT = 180
 local ESTIMATED_FUEL_FLOW_KG_PER_MIN = 2.5
 local DEPARTURE_FUEL_ALLOWANCE_KG = 8
 
--- Restrained mission-computer colours. The dark translucent panel keeps the
--- white text readable against bright clouds without obscuring the flight view.
-local DISPLAY_PANEL_COLOR = { 0.03, 0.06, 0.09, 0.82 }
-local DISPLAY_ACCENT_COLOR = { 0.10, 0.75, 0.90, 0.95 }
-local DISPLAY_TEXT_COLOR = { 1.00, 1.00, 1.00, 1.00 }
-local DISPLAY_MUTED_COLOR = { 0.60, 0.72, 0.76, 0.95 }
-local DISPLAY_SUCCESS_COLOR = { 0.35, 0.90, 0.45, 1.00 }
-local DISPLAY_CAUTION_COLOR = { 1.00, 0.70, 0.18, 1.00 }
-local DISPLAY_DANGER_COLOR = { 0.95, 0.25, 0.20, 1.00 }
-local DISPLAY_CRITICAL_COLOR = { 1.00, 0.42, 0.16, 1.00 }
-
--- Page selection is hosted in a FlyWithLua floating window. Unlike
--- do_on_mouse_click(), the window receives mouse input only inside its own
--- bounds, leaving the SF50's 3-D cockpit manipulators entirely to X-Plane.
+-- The mission computer is hosted in a FlyWithLua floating window. Unlike a
+-- global mouse callback, it receives input only inside its own bounds, leaving
+-- the SF50's 3-D cockpit manipulators entirely to X-Plane.
 local DISPLAY_PAGE_MISSION = "MISSION"
 local DISPLAY_PAGE_HOPS = "HOPS"
 local DISPLAY_PAGE_SATELLITE = "SATELLITE"
@@ -120,8 +109,10 @@ local DISPLAY_TABS = {
     { page = DISPLAY_PAGE_HOPS, label = "HOPS" },
     { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE" }
 }
-local DISPLAY_TAB_WINDOW_WIDTH = 390
-local DISPLAY_TAB_WINDOW_HEIGHT = 72
+-- The complete mission computer lives in this resizable floating window. The
+-- dimensions are only its initial size; the pilot may resize it in X-Plane.
+local DISPLAY_WINDOW_WIDTH = 720
+local DISPLAY_WINDOW_HEIGHT = 500
 
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
@@ -1957,33 +1948,8 @@ end
 
 
 ------------------------------------------------------------
--- DISPLAY
+-- MISSION COMPUTER WINDOW
 ------------------------------------------------------------
-
-local function set_display_color(color)
-    graphics.set_color(
-        color[1],
-        color[2],
-        color[3],
-        color[4]
-    )
-end
-
-local function satellite_severity_color(severity)
-    if severity == "DANGER" then
-        return DISPLAY_DANGER_COLOR
-    elseif severity == "CRITICAL" then
-        return DISPLAY_CRITICAL_COLOR
-    elseif severity == "CAUTION" then
-        return DISPLAY_CAUTION_COLOR
-    elseif severity == "SUCCESS" then
-        return DISPLAY_SUCCESS_COLOR
-    elseif severity == "UNAVAILABLE" then
-        return DISPLAY_MUTED_COLOR
-    end
-
-    return DISPLAY_ACCENT_COLOR
-end
 
 -- Alerts describe a recent event; this status describes the aircraft's current
 -- situation. It is always available as a fallback, so the surveillance area of
@@ -2059,226 +2025,105 @@ local function current_satellite_status()
         "UNAVAILABLE"
 end
 
-local function draw_display_background(starting_y, panel_height, panel_right)
-    local panel_left = 24
-    local resolved_panel_height = panel_height or 260
-    local resolved_panel_right = panel_right or 850
-    local panel_bottom = starting_y - resolved_panel_height
-    local panel_top = starting_y + 25
-
-    set_display_color(DISPLAY_PANEL_COLOR)
-    graphics.draw_rectangle(
-        panel_left,
-        panel_bottom,
-        resolved_panel_right,
-        panel_top
-    )
-
-    -- A narrow cyan edge identifies the campaign display without turning the
-    -- restrained aviation interface into an arcade-style HUD.
-    set_display_color(DISPLAY_ACCENT_COLOR)
-    graphics.draw_rectangle(
-        panel_left,
-        panel_bottom,
-        panel_left + 4,
-        panel_top
-    )
-
-    -- FlyWithLua's string helpers use the active graphics colour, so restore
-    -- white before any existing text is drawn.
-    set_display_color(DISPLAY_TEXT_COLOR)
+-- ImGui is deliberately kept behind these small helpers. If a FlyWithLua
+-- installation exposes only part of the API, the campaign update loop remains
+-- operational and the window simply omits unsupported separators.
+local function mission_computer_text(value)
+    if imgui ~= nil and type(imgui.Text) == "function" then
+        imgui.Text(tostring(value or ""))
+    end
 end
 
--- A new campaign begins with a dedicated briefing rather than forcing a long
--- narrative into the compact in-flight status layout. It remains visible while
--- the aircraft is at NZMO and automatically yields to the operational display
--- on the first takeoff.
-local function draw_campaign_opening_briefing(starting_y)
-    draw_display_background(starting_y, 445, 900)
+local function mission_computer_separator()
+    if imgui ~= nil and type(imgui.Separator) == "function" then
+        imgui.Separator()
+    end
+end
 
-    set_display_color(DISPLAY_TEXT_COLOR)
-    draw_string_Helvetica_18(40, starting_y, PLUGIN_NAME)
+local function build_opening_briefing_page()
+    mission_computer_text("CAMPAIGN OPENING BRIEFING // 06 JAN 2030")
+    mission_computer_separator()
 
-    set_display_color(DISPLAY_ACCENT_COLOR)
-    draw_string_Helvetica_18(130, starting_y, CAMPAIGN_SUBTITLE)
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 30,
-        "CAMPAIGN OPENING BRIEFING // 06 JAN 2030"
-    )
-
-    set_display_color(DISPLAY_TEXT_COLOR)
-    local briefing_y = starting_y - 55
     for _, briefing_line in ipairs(OPENING_BRIEFING_LINES) do
-        if briefing_line ~= "" then
-            draw_string_Helvetica_12(40, briefing_y, briefing_line)
-        end
-        briefing_y = briefing_y - 18
+        mission_computer_text(briefing_line)
     end
 
-    set_display_color(DISPLAY_ACCENT_COLOR)
-    draw_string_Helvetica_12(40, briefing_y - 5, "LEG 1 // THE DITCH")
-    set_display_color(DISPLAY_TEXT_COLOR)
-    draw_string_Helvetica_12(
-        40,
-        briefing_y - 25,
+    mission_computer_separator()
+    mission_computer_text("LEG 1 // THE DITCH")
+    mission_computer_text(
         "Build sufficient fuel reserves to reach YSRI Richmond Military Base."
     )
-    draw_string_Helvetica_12(
-        40,
-        briefing_y - 43,
-        "Objective: recover Alignment Key 1 of 8."
-    )
-
-    set_display_color(DISPLAY_CAUTION_COLOR)
-    draw_string_Helvetica_12(40, briefing_y - 73, "THREAT ADVISORY")
-    set_display_color(DISPLAY_TEXT_COLOR)
-    draw_string_Helvetica_12(
-        40,
-        briefing_y - 93,
+    mission_computer_text("Objective: recover Alignment Key 1 of 8.")
+    mission_computer_text("")
+    mission_computer_text("THREAT ADVISORY")
+    mission_computer_text(
         "Fuel is scarce. The AI controls Chinese and US satellite surveillance"
     )
-    draw_string_Helvetica_12(
-        40,
-        briefing_y - 111,
+    mission_computer_text(
         "networks and may have access to directed-energy systems."
     )
-
-    set_display_color(DISPLAY_MUTED_COLOR)
-    draw_string_Helvetica_12(
-        40,
-        briefing_y - 141,
-        string.format(
-            "AIRCRAFT SF50 | START NZMO | FUEL %.0f KG | %s",
-            get_total_fuel(),
-            status_message
-        )
-    )
-    set_display_color(DISPLAY_TEXT_COLOR)
+    mission_computer_text("")
+    mission_computer_text(string.format(
+        "AIRCRAFT SF50 | START NZMO | FUEL %.0f KG | %s",
+        get_total_fuel(),
+        status_message or "STATUS UNAVAILABLE"
+    ))
 end
 
-local function draw_display_tabs(starting_y)
-    set_display_color(DISPLAY_MUTED_COLOR)
-    draw_string_Helvetica_12(
-        530,
-        starting_y + 1,
-        "PAGE: " .. active_display_page .. " | SELECT IN MISSION COMPUTER"
-    )
-    set_display_color(DISPLAY_TEXT_COLOR)
-end
-
--- This builder is intentionally global because FlyWithLua locates ImGui
--- callbacks by name. ImGui confines these buttons to the floating window, so
--- no global X-Plane mouse callback is necessary.
-function xoof_build_display_tab_window()
-    if imgui == nil or type(imgui.Button) ~= "function" then
+local function build_mission_page()
+    if show_campaign_opening_briefing then
+        build_opening_briefing_page()
         return
     end
 
-    for index, tab in ipairs(DISPLAY_TABS) do
-        local button_label = tab.label
-        if active_display_page == tab.page then
-            button_label = "[ " .. tab.label .. " ]"
-        end
-
-        if imgui.Button(button_label, 112, 30) then
-            active_display_page = tab.page
-        end
-
-        if index < #DISPLAY_TABS and type(imgui.SameLine) == "function" then
-            imgui.SameLine()
-        end
-    end
-end
-
-local function create_display_tab_window()
-    -- FlyWithLua NG+ supplies these window functions. Guard every entry point
-    -- so an incomplete installation cannot stop campaign update/draw callbacks.
-    if type(float_wnd_create) ~= "function"
-        or type(float_wnd_set_title) ~= "function"
-        or type(float_wnd_set_imgui_builder) ~= "function" then
-        log_message("Mission computer tabs unavailable: floating-window API missing")
-        return
-    end
-
-    display_tab_window = float_wnd_create(
-        DISPLAY_TAB_WINDOW_WIDTH,
-        DISPLAY_TAB_WINDOW_HEIGHT,
-        1,
-        true
-    )
-
-    if display_tab_window == nil then
-        log_message("Mission computer tabs unavailable: window creation failed")
-        return
-    end
-
-    float_wnd_set_title(display_tab_window, "X2030 Mission Computer")
-    float_wnd_set_imgui_builder(
-        display_tab_window,
-        "xoof_build_display_tab_window"
-    )
-end
-
-local function draw_mission_page(starting_y)
-    draw_string_Helvetica_18(40, starting_y - 35, "MISSION STATUS")
-    draw_string_Helvetica_12(40, starting_y - 65, CURRENT_MISSION_STATUS)
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 90,
+    mission_computer_text("MISSION STATUS")
+    mission_computer_separator()
+    mission_computer_text(CURRENT_MISSION_STATUS)
+    mission_computer_text(
         "OBJECTIVE: Recover Alignment Key 1 of 8 at Richmond Military Base"
     )
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 115,
+    mission_computer_text(
         is_required_campaign_aircraft_loaded()
             and status_message
             or aircraft_requirement_message()
     )
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 140,
-        string.format(
-            "Fuel: %.0f kg | Left: %.0f | Right: %.0f",
-            get_total_fuel(),
-            number_or_zero(xoof_fuel_tanks[0]),
-            number_or_zero(xoof_fuel_tanks[1])
-        )
-    )
+    mission_computer_text("")
+    mission_computer_text(string.format(
+        "FUEL %.0f KG | LEFT %.0f | RIGHT %.0f",
+        get_total_fuel(),
+        number_or_zero(xoof_fuel_tanks[0]),
+        number_or_zero(xoof_fuel_tanks[1])
+    ))
 
-    if departure_airport ~= nil then
-        draw_string_Helvetica_12(
-            40,
-            starting_y - 165,
-            "Current airport: " .. departure_airport
-        )
-    end
+    mission_computer_text(
+        "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
+    )
 
     if last_fuel_transfer ~= nil then
         local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
             and "DEPOT DEPLETED"
-            or string.format("DEPOT REMAINING %.0f KG",
-                last_fuel_transfer.depot_remaining_kg)
+            or string.format(
+                "DEPOT REMAINING %.0f KG",
+                last_fuel_transfer.depot_remaining_kg
+            )
         local tank_state = last_fuel_transfer.aircraft_full
             and "AIRCRAFT TANKS FULL"
-            or string.format("AIRCRAFT TOTAL %.0f KG",
-                last_fuel_transfer.aircraft_total_kg)
-
-        draw_string_Helvetica_12(
-            40,
-            starting_y - 200,
-            string.format(
-                "DEPOT VERIFIED %.0f KG | TRANSFERRED %.0f KG | %s | %s",
-                last_fuel_transfer.depot_before_kg,
-                last_fuel_transfer.transferred_kg,
-                depot_state,
-                tank_state
+            or string.format(
+                "AIRCRAFT TOTAL %.0f KG",
+                last_fuel_transfer.aircraft_total_kg
             )
-        )
+
+        mission_computer_text("")
+        mission_computer_text(string.format(
+            "DEPOT VERIFIED %.0f KG | TRANSFERRED %.0f KG",
+            last_fuel_transfer.depot_before_kg,
+            last_fuel_transfer.transferred_kg
+        ))
+        mission_computer_text(depot_state .. " | " .. tank_state)
     end
 end
 
-local function draw_satellite_page(starting_y)
+local function build_satellite_page()
     local satellite_title = satellite_alert_title
     local satellite_detail = satellite_alert_detail
     local satellite_severity = satellite_alert_severity
@@ -2288,15 +2133,10 @@ local function draw_satellite_page(starting_y)
             current_satellite_status()
     end
 
+    mission_computer_text("SATELLITE COVERAGE")
+    mission_computer_separator()
+
     if satellite_title ~= nil then
-        set_display_color(satellite_severity_color(satellite_severity))
-
-        draw_string_Helvetica_12(
-            40,
-            starting_y - 65,
-            satellite_title
-        )
-
         local alert_detail = satellite_detail or ""
         if satellite_state == "LOCKED"
             and satellite_next_event_time ~= nil then
@@ -2314,48 +2154,28 @@ local function draw_satellite_page(starting_y)
                 )
         end
 
-        -- Supporting information remains white for readability. Colour is
-        -- reserved for the title so severity is clear without creating a large
-        -- arcade-like block of warning text.
-        set_display_color(DISPLAY_TEXT_COLOR)
-        draw_string_Helvetica_12(
-            40,
-            starting_y - 95,
-            alert_detail
+        mission_computer_text(
+            "[" .. tostring(satellite_severity or "INFORMATION") .. "] "
+                .. satellite_title
         )
-        set_display_color(DISPLAY_TEXT_COLOR)
+        mission_computer_text(alert_detail)
     end
 
-    draw_string_Helvetica_18(40, starting_y - 35, "SATELLITE COVERAGE")
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 135,
+    mission_computer_text("")
+    mission_computer_text(
         "MASKING ALTITUDE: Remain below 1,000 ft AGL in monitored airspace"
     )
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 160,
+    mission_computer_text(
         "THREAT: Satellite surveillance and directed-energy capability"
     )
 end
 
-local function draw_hops_page(starting_y)
-    draw_string_Helvetica_18(
-        40,
-        starting_y - 35,
-        "SUGGESTED NEXT HOPS"
-    )
+local function build_hops_page()
+    mission_computer_text("SUGGESTED NEXT HOPS")
+    mission_computer_separator()
 
     for index = 1, 3 do
-        local airport =
-            suggested_airports[index]
-
-        local line_y =
-            starting_y
-            -
-            45
-            -
-            (index * 50)
+        local airport = suggested_airports[index]
 
         if airport ~= nil then
             local affordability
@@ -2391,72 +2211,99 @@ local function draw_hops_page(starting_y)
                 reserve_description = " | SHORT RUNWAY / HIGH RESERVE"
             end
 
-            local depot_fuel = math.max(0,
-                number_or_zero(airport.available_fuel))
-            if depot_fuel == 0 then
-                set_display_color({ 0.95, 0.25, 0.20, 1.00 })
-            elseif depot_fuel < 120 then
-                set_display_color({ 1.00, 0.70, 0.18, 1.00 })
-            elseif depot_fuel < 180 then
-                set_display_color({ 0.35, 0.90, 0.45, 1.00 })
-            else
-                set_display_color(DISPLAY_ACCENT_COLOR)
-            end
+            local depot_fuel = math.max(
+                0,
+                number_or_zero(airport.available_fuel)
+            )
 
-            draw_string_Helvetica_12(
-                40,
-                line_y,
-                string.format(
-                    "%d. %s | %.0f NM | "
-                    .. "HDG %03.0f | "
-                    .. "EST %.0f KG | "
-                    .. "%s | DEPOT %.0f KG | %s%s",
-                    index,
-                    airport.icao,
-                    number_or_zero(airport.distance_nm),
-                    number_or_zero(airport.heading),
-                    number_or_zero(airport.required_fuel),
-                    runway_length_text,
-                    depot_fuel,
-                    affordability,
-                    reserve_description
-                )
-            )
-            set_display_color(DISPLAY_TEXT_COLOR)
+            mission_computer_text(string.format(
+                "%d. %s | %.0f NM | HDG %03.0f | %s",
+                index,
+                tostring(airport.icao or "UNKNOWN"),
+                number_or_zero(airport.distance_nm),
+                number_or_zero(airport.heading),
+                affordability
+            ))
+            mission_computer_text(string.format(
+                "   EST %.0f KG | %s | DEPOT %.0f KG%s",
+                number_or_zero(airport.required_fuel),
+                runway_length_text,
+                depot_fuel,
+                reserve_description
+            ))
+            mission_computer_text("")
         else
-            draw_string_Helvetica_12(
-                40,
-                line_y,
-                tostring(index)
-                .. ". No airport found"
-            )
+            mission_computer_text(tostring(index) .. ". No airport found")
+            mission_computer_text("")
         end
     end
 end
 
-function xoof_draw()
-    local starting_y = SCREEN_HIGHT - 60
-
-    if show_campaign_opening_briefing then
-        draw_campaign_opening_briefing(starting_y)
+-- This builder is intentionally global because FlyWithLua resolves ImGui
+-- callbacks by name. All mission information and interaction are confined to
+-- this movable window, leaving the SF50's 3-D cockpit manipulators untouched.
+function xoof_build_mission_computer_window()
+    if imgui == nil or type(imgui.Button) ~= "function" then
         return
     end
 
-    draw_display_background(starting_y)
-    draw_string_Helvetica_18(40, starting_y, PLUGIN_NAME)
-    set_display_color(DISPLAY_ACCENT_COLOR)
-    draw_string_Helvetica_12(130, starting_y + 2, CAMPAIGN_SUBTITLE)
-    draw_display_tabs(starting_y)
+    mission_computer_text(PLUGIN_NAME .. " // " .. CAMPAIGN_SUBTITLE)
+    mission_computer_separator()
+
+    for index, tab in ipairs(DISPLAY_TABS) do
+        local button_label = tab.label
+        if active_display_page == tab.page then
+            button_label = "[ " .. tab.label .. " ]"
+        end
+
+        if imgui.Button(button_label, 150, 30) then
+            active_display_page = tab.page
+        end
+
+        if index < #DISPLAY_TABS and type(imgui.SameLine) == "function" then
+            imgui.SameLine()
+        end
+    end
+
+    mission_computer_separator()
 
     if active_display_page == DISPLAY_PAGE_HOPS then
-        draw_hops_page(starting_y)
+        build_hops_page()
     elseif active_display_page == DISPLAY_PAGE_SATELLITE then
-        draw_satellite_page(starting_y)
+        build_satellite_page()
     else
-        -- Unknown state safely returns to the operational mission page.
         active_display_page = DISPLAY_PAGE_MISSION
-        draw_mission_page(starting_y)
+        build_mission_page()
     end
+end
+
+local function create_mission_computer_window()
+    -- FlyWithLua NG+ supplies these window functions. Guard every entry point
+    -- so an incomplete installation cannot stop campaign update callbacks.
+    if type(float_wnd_create) ~= "function"
+        or type(float_wnd_set_title) ~= "function"
+        or type(float_wnd_set_imgui_builder) ~= "function" then
+        log_message("Mission computer unavailable: floating-window API missing")
+        return
+    end
+
+    display_tab_window = float_wnd_create(
+        DISPLAY_WINDOW_WIDTH,
+        DISPLAY_WINDOW_HEIGHT,
+        1,
+        true
+    )
+
+    if display_tab_window == nil then
+        log_message("Mission computer unavailable: window creation failed")
+        return
+    end
+
+    float_wnd_set_title(display_tab_window, "X2030 Mission Computer")
+    float_wnd_set_imgui_builder(
+        display_tab_window,
+        "xoof_build_mission_computer_window"
+    )
 end
 
 function xoof_save_before_exit()
@@ -2470,11 +2317,10 @@ end
 ------------------------------------------------------------
 
 do_often("xoof_update()")
-do_every_draw("xoof_draw()")
 do_on_exit("xoof_save_before_exit()")
 
 load_campaign_sounds()
-create_display_tab_window()
+create_mission_computer_window()
 
 if load_valid_land_airports() then
     initialise_departure_airport()
