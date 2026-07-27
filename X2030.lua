@@ -1,5 +1,5 @@
 -- X2030
--- Prototype 0.6
+-- Prototype 0.7
 -- Airport fuel, next-hop suggestions and satellite surveillance
 
 local PLUGIN_NAME = "X2030"
@@ -109,6 +109,20 @@ local DISPLAY_CAUTION_COLOR = { 1.00, 0.70, 0.18, 1.00 }
 local DISPLAY_DANGER_COLOR = { 0.95, 0.25, 0.20, 1.00 }
 local DISPLAY_CRITICAL_COLOR = { 1.00, 0.42, 0.16, 1.00 }
 
+-- The mission computer uses three deliberately small tab hitboxes. Mouse
+-- handling is limited to these rectangles so clicks elsewhere continue to the
+-- X-Plane cockpit rather than being swallowed by the overlay.
+local DISPLAY_PAGE_MISSION = "MISSION"
+local DISPLAY_PAGE_HOPS = "HOPS"
+local DISPLAY_PAGE_SATELLITE = "SATELLITE"
+local DISPLAY_TAB_TOP_OFFSET = 18
+local DISPLAY_TAB_BOTTOM_OFFSET = -8
+local DISPLAY_TABS = {
+    { page = DISPLAY_PAGE_MISSION, label = "MISSION", left = 530, right = 625 },
+    { page = DISPLAY_PAGE_HOPS, label = "HOPS", left = 635, right = 720 },
+    { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE", left = 730, right = 850 }
+}
+
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
 ------------------------------------------------------------
@@ -206,6 +220,7 @@ local status_message =
     "Initialising airport detection..."
 local last_saved_fuel_signature = nil
 local last_fuel_transfer = nil
+local active_display_page = DISPLAY_PAGE_MISSION
 
 -- Satellite event time advances only while the simulator is not paused. This
 -- prevents a tracking countdown expiring while the player is in a menu.
@@ -2141,26 +2156,60 @@ local function draw_campaign_opening_briefing(starting_y)
     set_display_color(DISPLAY_TEXT_COLOR)
 end
 
-function xoof_draw()
-    local starting_y =
-        SCREEN_HIGHT - 60
+local function draw_display_tabs(starting_y)
+    for _, tab in ipairs(DISPLAY_TABS) do
+        if active_display_page == tab.page then
+            set_display_color(DISPLAY_ACCENT_COLOR)
+            graphics.draw_rectangle(
+                tab.left,
+                starting_y + DISPLAY_TAB_BOTTOM_OFFSET,
+                tab.right,
+                starting_y + DISPLAY_TAB_TOP_OFFSET
+            )
+            set_display_color(DISPLAY_PANEL_COLOR)
+        else
+            set_display_color(DISPLAY_MUTED_COLOR)
+        end
 
-    if show_campaign_opening_briefing then
-        draw_campaign_opening_briefing(starting_y)
-        return
+        draw_string_Helvetica_12(tab.left + 10, starting_y + 1, tab.label)
     end
 
-    draw_display_background(starting_y)
+    set_display_color(DISPLAY_TEXT_COLOR)
+end
 
-    draw_string_Helvetica_18(
+local function draw_mission_page(starting_y)
+    draw_string_Helvetica_18(40, starting_y - 35, "MISSION STATUS")
+    draw_string_Helvetica_12(40, starting_y - 65, CURRENT_MISSION_STATUS)
+    draw_string_Helvetica_12(
         40,
-        starting_y,
-        PLUGIN_NAME
+        starting_y - 90,
+        "OBJECTIVE: Recover Alignment Key 1 of 8 at Richmond Military Base"
+    )
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 115,
+        is_required_campaign_aircraft_loaded()
+            and status_message
+            or aircraft_requirement_message()
+    )
+    draw_string_Helvetica_12(
+        40,
+        starting_y - 140,
+        string.format(
+            "Fuel: %.0f kg | Left: %.0f | Right: %.0f",
+            get_total_fuel(),
+            number_or_zero(xoof_fuel_tanks[0]),
+            number_or_zero(xoof_fuel_tanks[1])
+        )
     )
 
-    set_display_color(DISPLAY_ACCENT_COLOR)
-    draw_string_Helvetica_12(130, starting_y + 2, CAMPAIGN_SUBTITLE)
-    set_display_color(DISPLAY_TEXT_COLOR)
+    if departure_airport ~= nil then
+        draw_string_Helvetica_12(
+            40,
+            starting_y - 165,
+            "Current airport: " .. departure_airport
+        )
+    end
 
     if last_fuel_transfer ~= nil then
         local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
@@ -2173,8 +2222,8 @@ function xoof_draw()
                 last_fuel_transfer.aircraft_total_kg)
 
         draw_string_Helvetica_12(
-            430,
-            starting_y - 125,
+            40,
+            starting_y - 200,
             string.format(
                 "DEPOT VERIFIED %.0f KG | TRANSFERRED %.0f KG | %s | %s",
                 last_fuel_transfer.depot_before_kg,
@@ -2184,13 +2233,9 @@ function xoof_draw()
             )
         )
     end
+end
 
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 25,
-        CURRENT_MISSION_STATUS
-    )
-
+local function draw_satellite_page(starting_y)
     local satellite_title = satellite_alert_title
     local satellite_detail = satellite_alert_detail
     local satellite_severity = satellite_alert_severity
@@ -2204,8 +2249,8 @@ function xoof_draw()
         set_display_color(satellite_severity_color(satellite_severity))
 
         draw_string_Helvetica_12(
-            430,
-            starting_y - 85,
+            40,
+            starting_y - 65,
             satellite_title
         )
 
@@ -2231,57 +2276,30 @@ function xoof_draw()
         -- arcade-like block of warning text.
         set_display_color(DISPLAY_TEXT_COLOR)
         draw_string_Helvetica_12(
-            430,
-            starting_y - 105,
+            40,
+            starting_y - 95,
             alert_detail
         )
         set_display_color(DISPLAY_TEXT_COLOR)
     end
 
+    draw_string_Helvetica_18(40, starting_y - 35, "SATELLITE COVERAGE")
     draw_string_Helvetica_12(
         40,
-        starting_y - 45,
-        "OBJECTIVE: Recover Alignment Key 1 of 8 at Richmond Military Base"
+        starting_y - 135,
+        "MASKING ALTITUDE: Remain below 1,000 ft AGL in monitored airspace"
     )
-
     draw_string_Helvetica_12(
         40,
-        starting_y - 65,
+        starting_y - 160,
         "THREAT: Satellite surveillance and directed-energy capability"
     )
+end
 
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 85,
-        is_required_campaign_aircraft_loaded()
-            and status_message
-            or aircraft_requirement_message()
-    )
-
-    draw_string_Helvetica_12(
-        40,
-        starting_y - 105,
-        string.format(
-            "Fuel: %.0f kg | "
-            .. "Left: %.0f | Right: %.0f",
-            get_total_fuel(),
-            number_or_zero(xoof_fuel_tanks[0]),
-            number_or_zero(xoof_fuel_tanks[1])
-        )
-    )
-
-    if departure_airport ~= nil then
-        draw_string_Helvetica_12(
-            40,
-            starting_y - 125,
-            "Current airport: "
-            .. departure_airport
-        )
-    end
-
+local function draw_hops_page(starting_y)
     draw_string_Helvetica_18(
         40,
-        starting_y - 155,
+        starting_y - 35,
         "SUGGESTED NEXT HOPS"
     )
 
@@ -2292,9 +2310,9 @@ function xoof_draw()
         local line_y =
             starting_y
             -
-            155
+            45
             -
-            (index * 25)
+            (index * 50)
 
         if airport ~= nil then
             local affordability
@@ -2373,6 +2391,63 @@ function xoof_draw()
     end
 end
 
+function xoof_draw()
+    local starting_y = SCREEN_HIGHT - 60
+
+    if show_campaign_opening_briefing then
+        draw_campaign_opening_briefing(starting_y)
+        return
+    end
+
+    draw_display_background(starting_y)
+    draw_string_Helvetica_18(40, starting_y, PLUGIN_NAME)
+    set_display_color(DISPLAY_ACCENT_COLOR)
+    draw_string_Helvetica_12(130, starting_y + 2, CAMPAIGN_SUBTITLE)
+    draw_display_tabs(starting_y)
+
+    if active_display_page == DISPLAY_PAGE_HOPS then
+        draw_hops_page(starting_y)
+    elseif active_display_page == DISPLAY_PAGE_SATELLITE then
+        draw_satellite_page(starting_y)
+    else
+        -- Unknown state safely returns to the operational mission page.
+        active_display_page = DISPLAY_PAGE_MISSION
+        draw_mission_page(starting_y)
+    end
+end
+
+function xoof_handle_mouse_click()
+    -- FlyWithLua mouse callbacks are global. Pass every click through to
+    -- X-Plane unless the press falls within one of the three visible tabs.
+    RESUME_MOUSE_CLICK = true
+
+    if show_campaign_opening_briefing or MOUSE_STATUS ~= "down" then
+        return
+    end
+
+    local mouse_x = tonumber(MOUSE_X)
+    local mouse_y = tonumber(MOUSE_Y)
+    local screen_height = tonumber(SCREEN_HIGHT)
+    if mouse_x == nil or mouse_y == nil or screen_height == nil then
+        return
+    end
+
+    local starting_y = screen_height - 60
+    local tab_bottom = starting_y + DISPLAY_TAB_BOTTOM_OFFSET
+    local tab_top = starting_y + DISPLAY_TAB_TOP_OFFSET
+    if mouse_y < tab_bottom or mouse_y > tab_top then
+        return
+    end
+
+    for _, tab in ipairs(DISPLAY_TABS) do
+        if mouse_x >= tab.left and mouse_x <= tab.right then
+            active_display_page = tab.page
+            RESUME_MOUSE_CLICK = false
+            return
+        end
+    end
+end
+
 
 function xoof_save_before_exit()
     if is_required_campaign_aircraft_loaded() then
@@ -2386,6 +2461,7 @@ end
 
 do_often("xoof_update()")
 do_every_draw("xoof_draw()")
+do_on_mouse_click("xoof_handle_mouse_click()")
 do_on_exit("xoof_save_before_exit()")
 
 load_campaign_sounds()
