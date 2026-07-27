@@ -109,19 +109,19 @@ local DISPLAY_CAUTION_COLOR = { 1.00, 0.70, 0.18, 1.00 }
 local DISPLAY_DANGER_COLOR = { 0.95, 0.25, 0.20, 1.00 }
 local DISPLAY_CRITICAL_COLOR = { 1.00, 0.42, 0.16, 1.00 }
 
--- The mission computer uses three deliberately small tab hitboxes. Mouse
--- handling is limited to these rectangles so clicks elsewhere continue to the
--- X-Plane cockpit rather than being swallowed by the overlay.
+-- Page selection is hosted in a FlyWithLua floating window. Unlike
+-- do_on_mouse_click(), the window receives mouse input only inside its own
+-- bounds, leaving the SF50's 3-D cockpit manipulators entirely to X-Plane.
 local DISPLAY_PAGE_MISSION = "MISSION"
 local DISPLAY_PAGE_HOPS = "HOPS"
 local DISPLAY_PAGE_SATELLITE = "SATELLITE"
-local DISPLAY_TAB_TOP_OFFSET = 18
-local DISPLAY_TAB_BOTTOM_OFFSET = -8
 local DISPLAY_TABS = {
-    { page = DISPLAY_PAGE_MISSION, label = "MISSION", left = 530, right = 625 },
-    { page = DISPLAY_PAGE_HOPS, label = "HOPS", left = 635, right = 720 },
-    { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE", left = 730, right = 850 }
+    { page = DISPLAY_PAGE_MISSION, label = "MISSION" },
+    { page = DISPLAY_PAGE_HOPS, label = "HOPS" },
+    { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE" }
 }
+local DISPLAY_TAB_WINDOW_WIDTH = 390
+local DISPLAY_TAB_WINDOW_HEIGHT = 72
 
 ------------------------------------------------------------
 -- X-PLANE DATAREFS
@@ -221,6 +221,7 @@ local status_message =
 local last_saved_fuel_signature = nil
 local last_fuel_transfer = nil
 local active_display_page = DISPLAY_PAGE_MISSION
+local display_tab_window = nil
 
 -- Satellite event time advances only while the simulator is not paused. This
 -- prevents a tracking countdown expiring while the player is in a menu.
@@ -2157,24 +2158,66 @@ local function draw_campaign_opening_briefing(starting_y)
 end
 
 local function draw_display_tabs(starting_y)
-    for _, tab in ipairs(DISPLAY_TABS) do
-        if active_display_page == tab.page then
-            set_display_color(DISPLAY_ACCENT_COLOR)
-            graphics.draw_rectangle(
-                tab.left,
-                starting_y + DISPLAY_TAB_BOTTOM_OFFSET,
-                tab.right,
-                starting_y + DISPLAY_TAB_TOP_OFFSET
-            )
-            set_display_color(DISPLAY_PANEL_COLOR)
-        else
-            set_display_color(DISPLAY_MUTED_COLOR)
-        end
+    set_display_color(DISPLAY_MUTED_COLOR)
+    draw_string_Helvetica_12(
+        530,
+        starting_y + 1,
+        "PAGE: " .. active_display_page .. " | SELECT IN MISSION COMPUTER"
+    )
+    set_display_color(DISPLAY_TEXT_COLOR)
+end
 
-        draw_string_Helvetica_12(tab.left + 10, starting_y + 1, tab.label)
+-- This builder is intentionally global because FlyWithLua locates ImGui
+-- callbacks by name. ImGui confines these buttons to the floating window, so
+-- no global X-Plane mouse callback is necessary.
+function xoof_build_display_tab_window()
+    if imgui == nil or type(imgui.Button) ~= "function" then
+        return
     end
 
-    set_display_color(DISPLAY_TEXT_COLOR)
+    for index, tab in ipairs(DISPLAY_TABS) do
+        local button_label = tab.label
+        if active_display_page == tab.page then
+            button_label = "[ " .. tab.label .. " ]"
+        end
+
+        if imgui.Button(button_label, 112, 30) then
+            active_display_page = tab.page
+        end
+
+        if index < #DISPLAY_TABS and type(imgui.SameLine) == "function" then
+            imgui.SameLine()
+        end
+    end
+end
+
+local function create_display_tab_window()
+    -- FlyWithLua NG+ supplies these window functions. Guard every entry point
+    -- so an incomplete installation cannot stop campaign update/draw callbacks.
+    if type(float_wnd_create) ~= "function"
+        or type(float_wnd_set_title) ~= "function"
+        or type(float_wnd_set_imgui_builder) ~= "function" then
+        log_message("Mission computer tabs unavailable: floating-window API missing")
+        return
+    end
+
+    display_tab_window = float_wnd_create(
+        DISPLAY_TAB_WINDOW_WIDTH,
+        DISPLAY_TAB_WINDOW_HEIGHT,
+        1,
+        true
+    )
+
+    if display_tab_window == nil then
+        log_message("Mission computer tabs unavailable: window creation failed")
+        return
+    end
+
+    float_wnd_set_title(display_tab_window, "X2030 Mission Computer")
+    float_wnd_set_imgui_builder(
+        display_tab_window,
+        "xoof_build_display_tab_window"
+    )
 end
 
 local function draw_mission_page(starting_y)
@@ -2416,39 +2459,6 @@ function xoof_draw()
     end
 end
 
-function xoof_handle_mouse_click()
-    -- FlyWithLua mouse callbacks are global. Pass every click through to
-    -- X-Plane unless the press falls within one of the three visible tabs.
-    RESUME_MOUSE_CLICK = true
-
-    if show_campaign_opening_briefing or MOUSE_STATUS ~= "down" then
-        return
-    end
-
-    local mouse_x = tonumber(MOUSE_X)
-    local mouse_y = tonumber(MOUSE_Y)
-    local screen_height = tonumber(SCREEN_HIGHT)
-    if mouse_x == nil or mouse_y == nil or screen_height == nil then
-        return
-    end
-
-    local starting_y = screen_height - 60
-    local tab_bottom = starting_y + DISPLAY_TAB_BOTTOM_OFFSET
-    local tab_top = starting_y + DISPLAY_TAB_TOP_OFFSET
-    if mouse_y < tab_bottom or mouse_y > tab_top then
-        return
-    end
-
-    for _, tab in ipairs(DISPLAY_TABS) do
-        if mouse_x >= tab.left and mouse_x <= tab.right then
-            active_display_page = tab.page
-            RESUME_MOUSE_CLICK = false
-            return
-        end
-    end
-end
-
-
 function xoof_save_before_exit()
     if is_required_campaign_aircraft_loaded() then
         save_campaign_progress()
@@ -2461,10 +2471,10 @@ end
 
 do_often("xoof_update()")
 do_every_draw("xoof_draw()")
-do_on_mouse_click("xoof_handle_mouse_click()")
 do_on_exit("xoof_save_before_exit()")
 
 load_campaign_sounds()
+create_display_tab_window()
 
 if load_valid_land_airports() then
     initialise_departure_airport()
