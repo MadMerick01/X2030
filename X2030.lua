@@ -106,7 +106,7 @@ local DISPLAY_PAGE_HOPS = "HOPS"
 local DISPLAY_PAGE_SATELLITE = "SATELLITE"
 local DISPLAY_TABS = {
     { page = DISPLAY_PAGE_MISSION, label = "MISSION" },
-    { page = DISPLAY_PAGE_HOPS, label = "HOPS" },
+    { page = DISPLAY_PAGE_HOPS, label = "FUEL" },
     { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE" }
 }
 -- The complete mission computer lives in this resizable floating window. The
