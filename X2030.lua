@@ -2025,12 +2025,20 @@ local function current_satellite_status()
         "UNAVAILABLE"
 end
 
--- ImGui is deliberately kept behind these small helpers. If a FlyWithLua
--- installation exposes only part of the API, the campaign update loop remains
--- operational and the window simply omits unsupported separators.
+-- FlyWithLua's ImGui binding exposes plain labels as TextUnformatted. Prefer
+-- that function so percent signs and other mission text are never interpreted
+-- as formatting tokens. The Text fallback keeps compatibility with bindings
+-- that expose only the upstream ImGui name.
 local function mission_computer_text(value)
-    if imgui ~= nil and type(imgui.Text) == "function" then
-        imgui.Text(tostring(value or ""))
+    if imgui == nil then
+        return
+    end
+
+    local resolved_text = tostring(value or "")
+    if type(imgui.TextUnformatted) == "function" then
+        imgui.TextUnformatted(resolved_text)
+    elseif type(imgui.Text) == "function" then
+        imgui.Text(resolved_text)
     end
 end
 
