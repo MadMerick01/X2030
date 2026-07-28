@@ -104,10 +104,14 @@ local DEPARTURE_FUEL_ALLOWANCE_KG = 8
 local DISPLAY_PAGE_MISSION = "MISSION"
 local DISPLAY_PAGE_HOPS = "HOPS"
 local DISPLAY_PAGE_SATELLITE = "SATELLITE"
+local DISPLAY_PAGE_MAINTENANCE = "MAINTENANCE"
+local DISPLAY_PAGE_KEYS = "KEYS"
 local DISPLAY_TABS = {
     { page = DISPLAY_PAGE_MISSION, label = "MISSION" },
     { page = DISPLAY_PAGE_HOPS, label = "FUEL" },
-    { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE" }
+    { page = DISPLAY_PAGE_SATELLITE, label = "SATELLITE" },
+    { page = DISPLAY_PAGE_MAINTENANCE, label = "MAINTENANCE" },
+    { page = DISPLAY_PAGE_KEYS, label = "KEYS" }
 }
 -- The complete mission computer lives in this resizable floating window. The
 -- dimensions are only its initial size; the pilot may resize it in X-Plane.
@@ -2264,7 +2268,8 @@ function xoof_build_mission_computer_window()
             button_label = "[ " .. tab.label .. " ]"
         end
 
-        if imgui.Button(button_label, 150, 30) then
+        -- Five restrained navigation buttons fit on the initial 720 px panel.
+        if imgui.Button(button_label, 125, 30) then
             active_display_page = tab.page
         end
 
@@ -2279,6 +2284,14 @@ function xoof_build_mission_computer_window()
         build_hops_page()
     elseif active_display_page == DISPLAY_PAGE_SATELLITE then
         build_satellite_page()
+    elseif active_display_page == DISPLAY_PAGE_MAINTENANCE then
+        mission_computer_text("MAINTENANCE")
+        mission_computer_separator()
+        mission_computer_text("Aircraft condition data is not yet available.")
+    elseif active_display_page == DISPLAY_PAGE_KEYS then
+        mission_computer_text("ALIGNMENT KEYS")
+        mission_computer_separator()
+        mission_computer_text("RECOVERED: 0 / 8")
     else
         active_display_page = DISPLAY_PAGE_MISSION
         build_mission_page()
