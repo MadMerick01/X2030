@@ -121,7 +121,7 @@ local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
 local REQUIRED_AIRCRAFT_ICAO = "SF50"
 local REQUIRED_AIRCRAFT_NAME = "Cirrus Vision SF50"
-local CAMPAIGN_SAVE_VERSION = 3
+local CAMPAIGN_SAVE_VERSION = 4
 local CAMPAIGN_PREFERENCES_DIRECTORY =
     SYSTEM_DIRECTORY
     .. "Output"
@@ -146,6 +146,7 @@ local MINIMUM_STARTING_FUEL_KG = 20
 local MAXIMUM_STARTING_FUEL_KG = 100
 local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
 local POUNDS_PER_KILOGRAM = 2.2046226218
+local FUEL_SAVE_INTERVAL_SECONDS = 30
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -330,6 +331,7 @@ local airport_database_loaded = false
 local status_message =
     "Initialising airport detection..."
 local last_saved_fuel_signature = nil
+local last_fuel_save_sim_time = nil
 local last_fuel_transfer = nil
 local active_display_page = DISPLAY_PAGE_MISSION
 local display_tab_window = nil
@@ -586,18 +588,18 @@ local function classify_airport_by_runway(runway_length_m)
     local runway = safe_number(runway_length_m, nil)
 
     if runway == nil or runway <= 0 then
-        return "UNKNOWN", 55, 150, 0.25, 0.05
+        return "UNKNOWN", 44, 120, 0.25, 0.05
     elseif runway < 700 then
-        return "TINY", 180, 250, 0.10, 0.10
+        return "TINY", 144, 200, 0.10, 0.10
     elseif runway < 1000 then
-        return "SMALL", 140, 220, 0.15, 0.10
+        return "SMALL", 112, 176, 0.15, 0.10
     elseif runway < 1500 then
-        return "REGIONAL", 90, 175, 0.25, 0.05
+        return "REGIONAL", 72, 140, 0.25, 0.05
     elseif runway < 2200 then
-        return "LARGE REGIONAL", 40, 120, 0.45, 0.02
+        return "LARGE REGIONAL", 32, 96, 0.45, 0.02
     end
 
-    return "MAJOR", 0, 55, 0.70, 0
+    return "MAJOR", 0, 44, 0.70, 0
 end
 
 
@@ -611,9 +613,9 @@ local function generate_initial_airport_fuel(airport_icao, runway_length_m)
         fuel_kg = 0
     elseif math.random() < high_reserve_chance then
         if size_class == "TINY" then
-            fuel_kg = math.random(220, 280)
+            fuel_kg = math.random(176, 224)
         else
-            fuel_kg = math.random(180, 250)
+            fuel_kg = math.random(144, 200)
         end
     else
         fuel_kg = math.random(normal_minimum, normal_maximum)
@@ -716,6 +718,7 @@ local function load_campaign_save()
 
     local save_version = tonumber(saved_values.version)
     if (save_version ~= 1 and save_version ~= 2
+            and save_version ~= 3
             and save_version ~= CAMPAIGN_SAVE_VERSION)
         or saved_values.campaign_started ~= "1"
         or not is_valid_airport_identifier(
@@ -725,7 +728,7 @@ local function load_campaign_save()
         return nil, "invalid", loaded_save_path
     end
 
-    if save_version == 2 or save_version == CAMPAIGN_SAVE_VERSION then
+    if save_version >= 2 then
         local saved_name = saved_values.pilot_name or ""
         local saved_starting_fuel = tonumber(saved_values.starting_fuel_kg)
         if #saved_name < 2 or #saved_name > 32
@@ -743,7 +746,7 @@ local function load_campaign_save()
     local saved_protocol_assembled = false
     local saved_campaign_completed = false
 
-    if save_version == CAMPAIGN_SAVE_VERSION then
+    if save_version >= 3 then
         saved_campaign_leg = tonumber(saved_values.campaign_leg)
         saved_keys_recovered = tonumber(saved_values.keys_recovered)
         saved_protocol_assembled = saved_values.protocol_assembled == "1"
@@ -766,7 +769,10 @@ local function load_campaign_save()
 
     local saved_fuel_tanks = {}
 
-    for tank = 0, 8 do
+    -- Save versions 1-3 stored all nine generic X-Plane tank slots. Version 4
+    -- stores only the two tanks used by the campaign's required SF50.
+    local final_saved_tank = save_version >= 4 and 1 or 8
+    for tank = 0, final_saved_tank do
         local saved_fuel = tonumber(
             saved_values["fuel_tank_" .. tostring(tank)]
         )
@@ -831,7 +837,7 @@ local function save_campaign_progress()
         "campaign_completed=", campaign_completed and "1\n" or "0\n"
     )
 
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         save_file:write(
             "fuel_tank_", tostring(tank), "=",
             string.format("%.3f", number_or_zero(xoof_fuel_tanks[tank])),
@@ -859,7 +865,7 @@ local function save_campaign_progress()
 
 
     local saved_tanks = {}
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         saved_tanks[#saved_tanks + 1] = string.format(
             "%.3f",
             number_or_zero(xoof_fuel_tanks[tank])
@@ -867,6 +873,7 @@ local function save_campaign_progress()
     end
 
     last_saved_fuel_signature = table.concat(saved_tanks, ",")
+    last_fuel_save_sim_time = safe_number(xoof_sim_running_time, nil)
 
     return true
 end
@@ -893,8 +900,9 @@ local function backup_existing_campaign()
 end
 
 -- Fuel changes continuously in flight, so arrival-only saves can restore an
--- obsolete quantity after X-Plane is closed. A compact signature prevents
--- unnecessary writes when do_often runs while the aircraft is parked.
+-- obsolete quantity after X-Plane is closed. Check the compact two-tank SF50
+-- signature often, but limit disk writes to one every 30 seconds. Qualified
+-- arrivals and simulator exit still save immediately through their own paths.
 local function save_fuel_if_changed()
     if not campaign_started then
         return
@@ -902,14 +910,26 @@ local function save_fuel_if_changed()
 
     local current_tanks = {}
 
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         current_tanks[#current_tanks + 1] = string.format(
             "%.3f",
             number_or_zero(xoof_fuel_tanks[tank])
         )
     end
 
-    if table.concat(current_tanks, ",") ~= last_saved_fuel_signature then
+    local current_signature = table.concat(current_tanks, ",")
+    if current_signature == last_saved_fuel_signature then
+        return
+    end
+
+    local current_sim_time = safe_number(xoof_sim_running_time, nil)
+    if current_sim_time == nil then
+        return
+    end
+
+    if last_fuel_save_sim_time == nil
+        or current_sim_time - last_fuel_save_sim_time
+            >= FUEL_SAVE_INTERVAL_SECONDS then
         save_campaign_progress()
     end
 end
@@ -919,7 +939,7 @@ local function restore_saved_fuel(saved_fuel_tanks)
         return
     end
 
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         local saved_fuel = saved_fuel_tanks[tank]
 
         if is_number(saved_fuel) and saved_fuel >= 0 then
@@ -1764,7 +1784,7 @@ end
 local function get_total_fuel()
     local total_fuel = 0
 
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         total_fuel =
             total_fuel
             +
@@ -1959,7 +1979,7 @@ local function set_initial_campaign_fuel(starting_fuel_kg)
         MAXIMUM_STARTING_FUEL_KG
     )
 
-    for tank = 0, 8 do
+    for tank = 0, 1 do
         xoof_fuel_tanks[tank] = 0
     end
 
@@ -2803,7 +2823,7 @@ function xoof_build_mission_computer_window()
         mission_computer_text("LOAD EXISTING PROFILE")
         if available_saved_campaign ~= nil then
             local saved_fuel_total = 0
-            for tank = 0, 8 do
+            for tank = 0, 1 do
                 saved_fuel_total = saved_fuel_total
                     + number_or_zero(available_saved_campaign.fuel_tanks[tank])
             end

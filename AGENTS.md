@@ -23,7 +23,12 @@ This project is an X-Plane 12 survival campaign implemented with FlyWithLua.
 - Do not rewrite working systems unnecessarily.
 - Prefer complete replacement functions or complete tested script versions when changes are extensive.
 - Preserve the Cirrus Vision Jet SF50 as the initial campaign aircraft.
-- Preserve the standard 50 kg airport fuel allocation unless the requested feature changes it.
+- Preserve the runway-based variable airport fuel model: smaller airfields
+  generally retain more fuel, while larger airports generally retain less.
+  Keep balancing changes explicit and documented rather than reverting to a
+  fixed allocation.
+- The campaign exclusively supports the Cirrus Vision Jet SF50 and may rely on
+  its two-tank fuel layout.
 - Keep the interface professional, restrained and believable for 2030.
 - Avoid arcade, fantasy, zombie or exaggerated military themes.
 
