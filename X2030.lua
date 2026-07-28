@@ -353,6 +353,7 @@ local profile_name_input = ""
 local profile_status_message = "Select or create a pilot profile."
 local available_saved_campaign = nil
 local available_save_error = nil
+local maintenance_status_message = nil
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -1224,6 +1225,76 @@ local function update_nearest_airport()
     nearest_airport_name,
     nearest_airport_distance_km =
         find_nearest_airport()
+end
+
+------------------------------------------------------------
+-- TEMPORARY AIRCRAFT REPAIR
+------------------------------------------------------------
+
+-- Until the campaign's full mechanical-condition system is implemented,
+-- recognised airports can clear X-Plane failures after the SF50 is safely
+-- parked. This deliberately uses the repair-only command rather than X-Plane's
+-- broader servicing command so maintenance cannot bypass scarce airport fuel.
+local function get_aircraft_repair_eligibility()
+    if xoof_on_ground ~= 1 then
+        return false, "LAND AT A RECOGNISED AIRPORT"
+    end
+
+    if not is_number(xoof_groundspeed)
+        or xoof_groundspeed >= STOPPED_SPEED_MPS then
+
+        return false, "BRING AIRCRAFT TO A COMPLETE STOP"
+    end
+
+    local engine_running_value = xoof_engine_running[0]
+    if not is_number(engine_running_value) then
+        return false, "ENGINE STATE COULD NOT BE VERIFIED"
+    end
+
+    if engine_running_value == 1 then
+        return false, "SHUT DOWN ENGINE"
+    end
+
+    -- Refresh at the point of use. Airport navigation data can be absent or
+    -- incomplete, so every invalid result simply makes repair unavailable.
+    update_nearest_airport()
+
+    if nearest_airport == nil then
+        return false, "NO RECOGNISED AIRPORT IN RANGE"
+    end
+
+    if not is_number(nearest_airport_distance_km) then
+        return false, "AIRPORT POSITION COULD NOT BE VERIFIED"
+    end
+
+    if nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
+        return false, "NO RECOGNISED AIRPORT IN RANGE"
+    end
+
+    return true, nearest_airport
+end
+
+local function repair_aircraft_at_airport()
+    local repair_available, repair_detail =
+        get_aircraft_repair_eligibility()
+
+    if not repair_available then
+        maintenance_status_message =
+            "REPAIR UNAVAILABLE // " .. repair_detail
+        return false
+    end
+
+    if type(command_once) ~= "function" then
+        maintenance_status_message =
+            "REPAIR UNAVAILABLE // X-PLANE COMMAND API NOT AVAILABLE"
+        return false
+    end
+
+    command_once("sim/operation/fix_all_systems")
+    maintenance_status_message =
+        "AIRCRAFT REPAIR COMPLETE // ALL REPORTED FAILURES CLEARED AT "
+        .. repair_detail
+    return true
 end
 
 ------------------------------------------------------------
@@ -3416,7 +3487,39 @@ function xoof_build_mission_computer_window()
     elseif active_display_page == DISPLAY_PAGE_MAINTENANCE then
         mission_computer_text("MAINTENANCE")
         mission_computer_separator()
-        mission_computer_text("Aircraft condition data is not yet available.")
+        mission_computer_text("AIRCRAFT REPAIR")
+        mission_computer_text("Full systems repair is available while safely")
+        mission_computer_text("parked at a recognised airport.")
+        mission_computer_text(
+            "Repair clears failures only. Airport fuel reserves are not affected."
+        )
+        mission_computer_text("")
+
+        local repair_available, repair_detail =
+            get_aircraft_repair_eligibility()
+
+        if repair_available then
+            mission_computer_colored_text(
+                "REPAIR FACILITY AVAILABLE // " .. repair_detail,
+                0.20, 0.90, 0.42
+            )
+        else
+            -- Do not leave a previous airport's completion confirmation on
+            -- screen after the aircraft is moved or restarted.
+            maintenance_status_message = nil
+            mission_computer_colored_text(
+                "REPAIR UNAVAILABLE // " .. repair_detail,
+                1.0, 0.72, 0.20
+            )
+        end
+
+        if imgui.Button("REPAIR AIRCRAFT", 190, 30) then
+            repair_aircraft_at_airport()
+        end
+
+        if maintenance_status_message ~= nil then
+            mission_computer_text(maintenance_status_message)
+        end
     elseif active_display_page == DISPLAY_PAGE_KEYS then
         mission_computer_text("ALIGNMENT KEYS")
         mission_computer_separator()
