@@ -32,7 +32,7 @@ local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
 local REQUIRED_AIRCRAFT_ICAO = "SF50"
 local REQUIRED_AIRCRAFT_NAME = "Cirrus Vision SF50"
-local CAMPAIGN_SAVE_VERSION = 1
+local CAMPAIGN_SAVE_VERSION = 2
 local CAMPAIGN_PREFERENCES_DIRECTORY =
     SYSTEM_DIRECTORY
     .. "Output"
@@ -41,6 +41,8 @@ local CAMPAIGN_PREFERENCES_DIRECTORY =
     .. DIRECTORY_SEPARATOR
 local CAMPAIGN_SAVE_PATH =
     CAMPAIGN_PREFERENCES_DIRECTORY .. "X2030_Campaign.txt"
+local CAMPAIGN_BACKUP_PATH =
+    CAMPAIGN_PREFERENCES_DIRECTORY .. "X2030_Campaign.backup.txt"
 -- Existing campaigns used this filename before the main script was renamed.
 -- It remains readable so upgrading does not discard a player's progress.
 local LEGACY_CAMPAIGN_SAVE_PATH =
@@ -51,6 +53,8 @@ local LEGACY_CAMPAIGN_SAVE_PATH =
 ------------------------------------------------------------
 
 local INITIAL_CAMPAIGN_FUEL_KG = 40
+local MINIMUM_STARTING_FUEL_KG = 20
+local MAXIMUM_STARTING_FUEL_KG = 100
 local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
 local POUNDS_PER_KILOGRAM = 2.2046226218
 
@@ -196,6 +200,15 @@ local has_been_airborne = false
 local current_landing_processed = false
 local campaign_started = false
 local show_campaign_opening_briefing = false
+local profile_screen_active = true
+local overwrite_confirmation_active = false
+local pilot_name = nil
+local campaign_starting_fuel_kg = INITIAL_CAMPAIGN_FUEL_KG
+local profile_name_input = ""
+local profile_fuel_input = INITIAL_CAMPAIGN_FUEL_KG
+local profile_status_message = "Select or create a pilot profile."
+local available_saved_campaign = nil
+local available_save_error = nil
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -564,13 +577,27 @@ local function load_campaign_save()
 
     save_file:close()
 
-    if tonumber(saved_values.version) ~= CAMPAIGN_SAVE_VERSION
+    local save_version = tonumber(saved_values.version)
+    if (save_version ~= 1 and save_version ~= CAMPAIGN_SAVE_VERSION)
         or saved_values.campaign_started ~= "1"
         or not is_valid_airport_identifier(
             saved_values.current_airport
         ) then
 
         return nil, "invalid", loaded_save_path
+    end
+
+    if save_version == CAMPAIGN_SAVE_VERSION then
+        local saved_name = saved_values.pilot_name or ""
+        local saved_starting_fuel = tonumber(saved_values.starting_fuel_kg)
+        if #saved_name < 2 or #saved_name > 32
+            or string.find(saved_name, "[^%w%s%-%']")
+            or not is_number(saved_starting_fuel)
+            or saved_starting_fuel ~= math.floor(saved_starting_fuel)
+            or saved_starting_fuel < MINIMUM_STARTING_FUEL_KG
+            or saved_starting_fuel > MAXIMUM_STARTING_FUEL_KG then
+            return nil, "invalid", loaded_save_path
+        end
     end
 
     local saved_fuel_tanks = {}
@@ -592,6 +619,10 @@ local function load_campaign_save()
     end
 
     return {
+        version = save_version,
+        pilot_name = saved_values.pilot_name or "LEGACY PILOT",
+        starting_fuel_kg = tonumber(saved_values.starting_fuel_kg)
+            or INITIAL_CAMPAIGN_FUEL_KG,
         current_airport = saved_values.current_airport,
         fuel_tanks = saved_fuel_tanks
     }, nil, loaded_save_path
@@ -621,6 +652,9 @@ local function save_campaign_progress()
     save_file:write(
         "version=", tostring(CAMPAIGN_SAVE_VERSION), "\n",
         "campaign_started=1\n",
+        "pilot_name=", tostring(pilot_name or "UNKNOWN PILOT"), "\n",
+        "starting_fuel_kg=",
+            tostring(campaign_starting_fuel_kg), "\n",
         "current_airport=", departure_airport, "\n"
     )
 
@@ -661,6 +695,27 @@ local function save_campaign_progress()
 
     last_saved_fuel_signature = table.concat(saved_tanks, ",")
 
+    return true
+end
+
+-- Preserve one known-good profile before an explicit replacement. Failure to
+-- make the optional backup is reported but never removes the original save.
+local function backup_existing_campaign()
+    local source_file = io.open(CAMPAIGN_SAVE_PATH, "r")
+    if source_file == nil then
+        return true
+    end
+
+    local contents = source_file:read("*a")
+    source_file:close()
+
+    local backup_file = io.open(CAMPAIGN_BACKUP_PATH, "w")
+    if backup_file == nil then
+        return false
+    end
+
+    backup_file:write(contents or "")
+    backup_file:close()
     return true
 end
 
@@ -1630,145 +1685,180 @@ end
 -- A new campaign begins with an exact, deliberately scarce fuel load. Clear
 -- every simulator tank first so fuel configured in X-Plane cannot carry into
 -- the campaign, then balance the starting load across the SF50's two tanks.
-local function set_initial_campaign_fuel()
+local function set_initial_campaign_fuel(starting_fuel_kg)
+    local safe_starting_fuel = clamp(
+        starting_fuel_kg,
+        MINIMUM_STARTING_FUEL_KG,
+        MAXIMUM_STARTING_FUEL_KG
+    )
+
     for tank = 0, 8 do
         xoof_fuel_tanks[tank] = 0
     end
 
-    return add_balanced_fuel(INITIAL_CAMPAIGN_FUEL_KG)
+    return add_balanced_fuel(safe_starting_fuel)
 end
 
 ------------------------------------------------------------
 -- INITIAL AIRPORT
 ------------------------------------------------------------
 
-local function initialise_departure_airport()
+local function inspect_available_profile()
     campaign_started = false
     departure_airport = nil
+    profile_screen_active = true
+    overwrite_confirmation_active = false
+    suggested_airports = {}
 
-    -- Never initialise or restore campaign fuel in another aircraft. This also
-    -- leaves the save untouched until the player reloads the required SF50.
+    available_saved_campaign, available_save_error = load_campaign_save()
+
+    if available_save_error == "invalid" then
+        profile_status_message =
+            "Saved profile data is invalid. Check X-Plane Log.txt."
+    elseif available_saved_campaign ~= nil then
+        profile_status_message = "Existing pilot profile detected."
+    else
+        profile_status_message = "No existing profile detected."
+    end
+end
+
+local function validate_new_profile()
+    local cleaned_name = string.match(
+        tostring(profile_name_input or ""), "^%s*(.-)%s*$") or ""
+
+    if #cleaned_name < 2 or #cleaned_name > 32
+        or string.find(cleaned_name, "[^%w%s%-%']") then
+        return nil,
+            "Enter a name of 2-32 letters, numbers, spaces, hyphens or apostrophes."
+    end
+
+    local requested_fuel = tonumber(profile_fuel_input)
+    if not is_number(requested_fuel)
+        or requested_fuel ~= math.floor(requested_fuel)
+        or requested_fuel < MINIMUM_STARTING_FUEL_KG
+        or requested_fuel > MAXIMUM_STARTING_FUEL_KG then
+        return nil, string.format(
+            "Starting fuel must be a whole number from %d to %d kg.",
+            MINIMUM_STARTING_FUEL_KG, MAXIMUM_STARTING_FUEL_KG)
+    end
+
     if not is_required_campaign_aircraft_loaded() then
-        suggested_airports = {}
-        set_status(aircraft_requirement_message())
-        return
+        return nil, aircraft_requirement_message()
     end
 
     update_nearest_airport()
-
-    local saved_campaign, save_error, loaded_save_path =
-        load_campaign_save()
-
-    if nearest_airport == nil then
-        set_status(
-            "Campaign unavailable. No airport could be identified."
-        )
-
-        return
+    if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO
+        or not is_number(nearest_airport_distance_km)
+        or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
+        return nil, "Position the aircraft at NZMO to create a profile."
     end
 
-    if not is_number(nearest_airport_distance_km)
-        or nearest_airport_distance_km
-            > MAX_AIRPORT_DISTANCE_KM then
-
-        set_status(
-            "Campaign start unavailable. Position the aircraft at "
-            .. CAMPAIGN_START_AIRPORT_ICAO
-            .. "."
-        )
-
-        return
+    local _, aircraft_capacity_kg =
+        get_aircraft_remaining_fuel_capacity_kg()
+    if aircraft_capacity_kg == nil or requested_fuel > aircraft_capacity_kg then
+        return nil, "Starting fuel exceeds the loaded aircraft capacity."
     end
 
-    if save_error == "invalid" then
-        set_status(
-            "Campaign save is invalid. Check X-Plane Log.txt."
-        )
+    return { name = cleaned_name, starting_fuel_kg = requested_fuel }
+end
 
-        logMsg(
-            "[X2030] Invalid campaign save: "
-            .. loaded_save_path
-        )
-
-        return
+local function create_new_profile()
+    local new_profile, validation_error = validate_new_profile()
+    if new_profile == nil then
+        profile_status_message = validation_error
+        return false
     end
 
-    if saved_campaign ~= nil then
-        if not is_valid_destination_airport(
-            saved_campaign.current_airport
-        ) then
-
-            set_status(
-                "Saved airport is unavailable in the airport database."
-            )
-
-            return
-        end
-
-        if nearest_airport ~= saved_campaign.current_airport then
-            set_status(
-                "Saved campaign is at "
-                .. saved_campaign.current_airport
-                .. ". Load the aircraft there to continue."
-            )
-
-            return
-        end
-
-        departure_airport = saved_campaign.current_airport
-        campaign_started = true
-        show_campaign_opening_briefing = false
-        restore_saved_fuel(saved_campaign.fuel_tanks)
-        get_or_create_airport_fuel(
-            departure_airport,
-            get_longest_runway_metres(departure_airport)
-        )
-
-        set_status(
-            "Campaign resumed at "
-            .. departure_airport
-            .. ". Select your next hop."
-        )
-
-        refresh_airport_suggestions()
-        return
+    if (available_saved_campaign ~= nil or available_save_error == "invalid")
+        and not backup_existing_campaign() then
+        profile_status_message =
+            "Existing profile backup could not be written. Profile unchanged."
+        return false
     end
 
-    if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO then
-        set_status(
-            "Campaign begins at "
-            .. CAMPAIGN_START_AIRPORT_ICAO
-            .. " ("
-            .. CAMPAIGN_START_AIRPORT_NAME
-            .. ")."
-        )
-
-        return
-    end
-
-    departure_airport =
-        CAMPAIGN_START_AIRPORT_ICAO
+    pilot_name = new_profile.name
+    campaign_starting_fuel_kg = new_profile.starting_fuel_kg
+    departure_airport = CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
     show_campaign_opening_briefing = true
-    set_initial_campaign_fuel()
+    set_initial_campaign_fuel(campaign_starting_fuel_kg)
     get_or_create_airport_fuel(
-        departure_airport,
-        get_longest_runway_metres(departure_airport)
-    )
+        departure_airport, get_longest_runway_metres(departure_airport))
 
-    refresh_airport_suggestions()
-
-    if save_campaign_progress() then
-        set_status(
-            "Starting airport: "
-            .. departure_airport
-            .. ". Select your next hop."
-        )
-    else
-        set_status(
-            "Campaign started at NZMO, but progress could not be saved."
-        )
+    if not save_campaign_progress() then
+        campaign_started = false
+        departure_airport = nil
+        profile_status_message = "Profile could not be saved. Check X-Plane Log.txt."
+        return false
     end
+
+    available_saved_campaign = nil
+    available_save_error = nil
+    profile_screen_active = false
+    overwrite_confirmation_active = false
+    refresh_airport_suggestions()
+    set_status("Starting airport: NZMO. Select your next hop.")
+    return true
+end
+
+local function request_new_profile_creation()
+    local new_profile, validation_error = validate_new_profile()
+    if new_profile == nil then
+        profile_status_message = validation_error
+        return
+    end
+
+    if available_saved_campaign ~= nil or available_save_error == "invalid" then
+        overwrite_confirmation_active = true
+        profile_status_message = "Confirm replacement of the existing profile."
+        return
+    end
+
+    create_new_profile()
+end
+
+local function load_existing_profile()
+    if available_saved_campaign == nil then
+        profile_status_message = available_save_error == "invalid"
+            and "Saved profile data is invalid. Check X-Plane Log.txt."
+            or "No existing profile is available."
+        return false
+    end
+
+    if not is_required_campaign_aircraft_loaded() then
+        profile_status_message = aircraft_requirement_message()
+        return false
+    end
+
+    update_nearest_airport()
+    if nearest_airport ~= available_saved_campaign.current_airport
+        or not is_number(nearest_airport_distance_km)
+        or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
+        profile_status_message = "Load the SF50 at "
+            .. available_saved_campaign.current_airport
+            .. " to resume this profile."
+        return false
+    end
+
+    if not is_valid_destination_airport(
+        available_saved_campaign.current_airport) then
+        profile_status_message = "Saved airport is unavailable in the airport database."
+        return false
+    end
+
+    departure_airport = available_saved_campaign.current_airport
+    pilot_name = available_saved_campaign.pilot_name
+    campaign_starting_fuel_kg = available_saved_campaign.starting_fuel_kg
+    campaign_started = true
+    show_campaign_opening_briefing = false
+    restore_saved_fuel(available_saved_campaign.fuel_tanks)
+    get_or_create_airport_fuel(
+        departure_airport, get_longest_runway_metres(departure_airport))
+    profile_screen_active = false
+    refresh_airport_suggestions()
+    set_status("Campaign resumed at " .. departure_airport
+        .. ". Select your next hop.")
+    return true
 end
 
 ------------------------------------------------------------
@@ -2262,6 +2352,86 @@ function xoof_build_mission_computer_window()
     mission_computer_text(PLUGIN_NAME .. " // " .. CAMPAIGN_SUBTITLE)
     mission_computer_separator()
 
+    if profile_screen_active then
+        mission_computer_text("MISSION COMPUTER ACCESS")
+        mission_computer_text(profile_status_message)
+        mission_computer_separator()
+
+        mission_computer_text("CREATE NEW PILOT PROFILE")
+        if type(imgui.InputText) == "function" then
+            local first_value, second_value = imgui.InputText(
+                "NAME", profile_name_input, 33)
+            if type(first_value) == "string" then
+                profile_name_input = first_value
+            elseif type(second_value) == "string" then
+                profile_name_input = second_value
+            end
+        else
+            mission_computer_text("Name entry unavailable: ImGui InputText missing.")
+        end
+
+        if type(imgui.InputInt) == "function" then
+            local first_value, second_value = imgui.InputInt(
+                "STARTING FUEL (KG)", profile_fuel_input, 1, 10)
+            if type(first_value) == "number" then
+                profile_fuel_input = first_value
+            elseif type(second_value) == "number" then
+                profile_fuel_input = second_value
+            end
+        else
+            mission_computer_text("Fuel entry unavailable: ImGui InputInt missing.")
+        end
+
+        mission_computer_text("ORIGIN: NZMO - MANAPOURI / TE ANAU, NEW ZEALAND")
+        mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
+        mission_computer_text(string.format(
+            "ALLOCATION: %d-%d KG | STANDARD: %d KG",
+            MINIMUM_STARTING_FUEL_KG, MAXIMUM_STARTING_FUEL_KG,
+            INITIAL_CAMPAIGN_FUEL_KG))
+
+        if overwrite_confirmation_active then
+            mission_computer_text("")
+            mission_computer_text("AN EXISTING PROFILE WILL BE REPLACED")
+            if imgui.Button("CANCEL", 150, 30) then
+                overwrite_confirmation_active = false
+                profile_status_message = "Profile replacement cancelled."
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("REPLACE PROFILE", 190, 30) then
+                create_new_profile()
+            end
+        elseif imgui.Button("CREATE PILOT", 190, 30) then
+            request_new_profile_creation()
+        end
+
+        mission_computer_separator()
+        mission_computer_text("LOAD EXISTING PROFILE")
+        if available_saved_campaign ~= nil then
+            local saved_fuel_total = 0
+            for tank = 0, 8 do
+                saved_fuel_total = saved_fuel_total
+                    + number_or_zero(available_saved_campaign.fuel_tanks[tank])
+            end
+            mission_computer_text("PILOT: "
+                .. tostring(available_saved_campaign.pilot_name))
+            mission_computer_text(string.format(
+                "LOCATION: %s | SAVED FUEL: %.0f KG",
+                available_saved_campaign.current_airport, saved_fuel_total))
+            if imgui.Button("LOAD PROFILE", 190, 30) then
+                load_existing_profile()
+            end
+        else
+            mission_computer_text(available_save_error == "invalid"
+                and "PROFILE DATA COULD NOT BE VERIFIED"
+                or "NO EXISTING PROFILE DETECTED")
+        end
+        return
+    end
+
+    mission_computer_text("PILOT: " .. tostring(pilot_name or "UNKNOWN PILOT")
+        .. " | PROFILE ACTIVE")
+    mission_computer_separator()
+
     for index, tab in ipairs(DISPLAY_TABS) do
         local button_label = tab.label
         if active_display_page == tab.page then
@@ -2304,7 +2474,7 @@ local function create_mission_computer_window()
     if type(float_wnd_create) ~= "function"
         or type(float_wnd_set_title) ~= "function"
         or type(float_wnd_set_imgui_builder) ~= "function" then
-        log_message("Mission computer unavailable: floating-window API missing")
+        logMsg("[X2030] Mission computer unavailable: floating-window API missing")
         return
     end
 
@@ -2316,7 +2486,7 @@ local function create_mission_computer_window()
     )
 
     if display_tab_window == nil then
-        log_message("Mission computer unavailable: window creation failed")
+        logMsg("[X2030] Mission computer unavailable: window creation failed")
         return
     end
 
@@ -2344,7 +2514,7 @@ load_campaign_sounds()
 create_mission_computer_window()
 
 if load_valid_land_airports() then
-    initialise_departure_airport()
+    inspect_available_profile()
 else
     set_status(
         "Airport database failed to load. "
