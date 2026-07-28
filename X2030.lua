@@ -149,6 +149,10 @@ local LEGACY_MAXIMUM_STARTING_FUEL_KG = 100
 local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
 local POUNDS_PER_KILOGRAM = 2.2046226218
 local FUEL_SAVE_INTERVAL_SECONDS = 30
+-- Manual depot service uses a deliberate five-kilogram planning step. The
+-- final step is clamped to the exact depot stock or free tank capacity so small
+-- residual amounts are never stranded by the interface.
+local FUEL_LOADING_STEP_KG = 5
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -369,6 +373,11 @@ local status_message =
 local last_saved_fuel_signature = nil
 local last_fuel_save_sim_time = nil
 local last_fuel_transfer = nil
+-- Ordinary-airport fuel is staged before transfer. This keeps button presses
+-- from repeatedly modifying X-Plane's tanks and gives the pilot one precise,
+-- reviewable transfer instead.
+local pending_fuel_service = nil
+local selected_fuel_load_kg = 0
 local active_display_page = DISPLAY_PAGE_MISSION
 local display_tab_window = nil
 
@@ -2047,7 +2056,7 @@ local function add_balanced_fuel(fuel_amount_kg)
     return true
 end
 
-local function transfer_airport_fuel_to_aircraft(airport_icao)
+local function transfer_airport_fuel_to_aircraft(airport_icao, requested_fuel_kg)
     local record = get_or_create_airport_fuel(
         airport_icao, get_longest_runway_metres(airport_icao))
     if record == nil then
@@ -2063,8 +2072,10 @@ local function transfer_airport_fuel_to_aircraft(airport_icao)
         return nil
     end
 
+    local requested = safe_number(requested_fuel_kg, airport_fuel_before)
+    requested = math.max(0, requested)
     local transferred = clamp(
-        math.min(airport_fuel_before, remaining_capacity),
+        math.min(requested, airport_fuel_before, remaining_capacity),
         0, remaining_capacity)
 
     if transferred > 0 and not add_balanced_fuel(transferred) then
@@ -2091,6 +2102,83 @@ local function transfer_airport_fuel_to_aircraft(airport_icao)
         aircraft_total_kg = get_total_fuel(),
         aircraft_full = remaining_capacity <= transferred + 0.01
     }
+end
+
+-- Open a manual service session without changing either tank. The session is
+-- valid only for the present stopped arrival and is cleared on the next
+-- takeoff, so an ordinary airport still offers its finite reserve only once.
+local function prepare_airport_fuel_service(airport_icao)
+    local record = get_or_create_airport_fuel(
+        airport_icao, get_longest_runway_metres(airport_icao))
+    local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
+    if record == nil or remaining_capacity == nil then
+        return nil
+    end
+
+    touch_airport_fuel_record(airport_icao)
+    local available_fuel = math.max(0, safe_number(record.fuel_kg, 0))
+    pending_fuel_service = {
+        icao = airport_icao
+    }
+    selected_fuel_load_kg = 0
+
+    return {
+        icao = airport_icao,
+        depot_before_kg = available_fuel,
+        transferred_kg = 0,
+        depot_remaining_kg = available_fuel,
+        aircraft_total_kg = get_total_fuel(),
+        aircraft_full = remaining_capacity <= 0.01,
+        awaiting_manual_service = available_fuel > 0
+            and remaining_capacity > 0.01
+    }
+end
+
+local function maximum_selectable_fuel_kg()
+    if pending_fuel_service == nil
+        or pending_fuel_service.icao ~= departure_airport then
+        return 0
+    end
+
+    local record = get_airport_fuel_record(pending_fuel_service.icao)
+    local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
+    if record == nil or remaining_capacity == nil then
+        return 0
+    end
+
+    return math.max(0, math.min(
+        safe_number(record.fuel_kg, 0), remaining_capacity))
+end
+
+local function load_selected_airport_fuel()
+    local maximum_load = maximum_selectable_fuel_kg()
+    local requested_load = clamp(
+        safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+    if requested_load <= 0 or pending_fuel_service == nil then
+        return false
+    end
+
+    local result = transfer_airport_fuel_to_aircraft(
+        pending_fuel_service.icao, requested_load)
+    if result == nil then
+        set_status("Fuel service unavailable. No fuel transferred.")
+        return false
+    end
+
+    selected_fuel_load_kg = 0
+    last_fuel_transfer = result
+    if save_campaign_progress() then
+        set_status(string.format(
+            "Loaded %.0f kg at %s. Depot %.0f kg remaining.",
+            result.transferred_kg, result.icao, result.depot_remaining_kg))
+    else
+        set_status(string.format(
+            "Loaded %.0f kg at %s, but campaign save failed.",
+            result.transferred_kg, result.icao))
+    end
+
+    refresh_airport_suggestions()
+    return true
 end
 
 -- Resistance fuel is an unlimited strategic service rather than an airport
@@ -2205,6 +2293,8 @@ end
 local function inspect_available_profile()
     campaign_started = false
     departure_airport = nil
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     profile_screen_active = true
     overwrite_confirmation_active = false
     suggested_airports = {}
@@ -2291,6 +2381,8 @@ local function create_new_profile()
     pilot_name = new_profile.name
     campaign_starting_fuel_kg = INITIAL_CAMPAIGN_FUEL_KG
     departure_airport = CAMPAIGN_START_AIRPORT_ICAO
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     campaign_started = true
     campaign_leg = 1
     alignment_keys_recovered = 1
@@ -2367,6 +2459,8 @@ local function load_existing_profile()
     end
 
     departure_airport = available_saved_campaign.current_airport
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     pilot_name = available_saved_campaign.pilot_name
     campaign_starting_fuel_kg = available_saved_campaign.starting_fuel_kg
     campaign_leg = available_saved_campaign.campaign_leg or 1
@@ -2420,6 +2514,8 @@ function xoof_update()
     if xoof_on_ground == 0 then
         if not has_been_airborne then
             has_been_airborne = true
+            pending_fuel_service = nil
+            selected_fuel_load_kg = 0
             show_campaign_opening_briefing = false
             current_landing_processed =
                 false
@@ -2516,7 +2612,7 @@ function xoof_update()
             return_without_service = true
         }
     else
-        transfer_result = transfer_airport_fuel_to_aircraft(arrival_airport)
+        transfer_result = prepare_airport_fuel_service(arrival_airport)
     end
 
     if transfer_result == nil then
@@ -2554,6 +2650,8 @@ function xoof_update()
                 set_status(story_event .. " Fuel service unavailable; progress saved.")
             elseif transfer_result.resistance_service then
                 set_status(story_event .. " Resistance tanks filled the SF50.")
+            elseif transfer_result.awaiting_manual_service then
+                set_status(story_event .. " Fuel service ready on the FUEL page.")
             else
                 set_status(story_event .. " Progress saved.")
             end
@@ -2567,9 +2665,12 @@ function xoof_update()
         elseif transfer_result.depot_before_kg <= 0 then
             set_status("Arrived " .. arrival_airport
                 .. ". DEPOT DEPLETED. NO TRANSFER AVAILABLE.")
-        elseif transfer_result.transferred_kg <= 0 then
+        elseif transfer_result.aircraft_full then
             set_status("Arrived " .. arrival_airport
                 .. ". Aircraft tanks full. Depot unchanged.")
+        elseif transfer_result.awaiting_manual_service then
+            set_status("Arrived " .. arrival_airport
+                .. ". Select the required load on the FUEL page.")
         else
             set_status(string.format(
                 "Arrived %s. Transferred %.0f kg; depot %.0f kg. Progress saved.",
@@ -2580,7 +2681,7 @@ function xoof_update()
         set_status(
             "Arrived "
             .. arrival_airport
-            .. ". Fuel delivered, but campaign save failed."
+            .. ". Campaign save failed; fuel state may not be preserved."
         )
     end
 
@@ -2881,7 +2982,65 @@ local function build_fuel_status()
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
 
+    if pending_fuel_service ~= nil
+        and pending_fuel_service.icao == departure_airport then
+        local maximum_load = maximum_selectable_fuel_kg()
+        local service_record = get_airport_fuel_record(
+            pending_fuel_service.icao)
+        local depot_available = service_record ~= nil
+            and math.max(0, safe_number(service_record.fuel_kg, 0)) or 0
+        selected_fuel_load_kg = clamp(
+            safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+
+        mission_computer_text("")
+        mission_computer_separator()
+        mission_computer_text(string.format(
+            "DEPOT SERVICE %s | AVAILABLE %.0f KG",
+            tostring(pending_fuel_service.icao), depot_available))
+        mission_computer_text(string.format(
+            "SELECTED LOAD %.0f KG", selected_fuel_load_kg))
+
+        if imgui ~= nil and type(imgui.Button) == "function" then
+            if imgui.Button("CLEAR", 90, 30) then
+                selected_fuel_load_kg = 0
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("- 5 KG", 90, 30) then
+                selected_fuel_load_kg = math.max(
+                    0, selected_fuel_load_kg - FUEL_LOADING_STEP_KG)
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("+ 5 KG", 90, 30) then
+                selected_fuel_load_kg = math.min(
+                    maximum_load,
+                    selected_fuel_load_kg + FUEL_LOADING_STEP_KG)
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("MAX", 90, 30) then
+                selected_fuel_load_kg = maximum_load
+            end
+
+            local load_label = selected_fuel_load_kg > 0
+                and string.format(
+                    "LOAD SELECTED (%.0f KG)", selected_fuel_load_kg)
+                or "LOAD SELECTED"
+            if imgui.Button(load_label, 240, 34) then
+                load_selected_airport_fuel()
+            end
+        end
+
+        if maximum_load <= 0 then
+            mission_computer_text("NO LOAD AVAILABLE // DEPOT EMPTY OR TANKS FULL")
+        else
+            mission_computer_text(
+                "Adjust the staged quantity, then confirm one precise transfer.")
+        end
+    end
+
     if last_fuel_transfer ~= nil then
+        if last_fuel_transfer.awaiting_manual_service then
+            return
+        end
         if last_fuel_transfer.resistance_service then
             mission_computer_text("")
             mission_computer_text(string.format(
