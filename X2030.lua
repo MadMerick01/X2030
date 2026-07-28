@@ -1722,6 +1722,26 @@ local function inspect_available_profile()
     end
 end
 
+-- Leave the active profile without deleting it. Saving first ensures the start
+-- page immediately offers the latest campaign state for a later resume. If the
+-- save cannot be written, keep the profile open rather than implying that the
+-- logout completed safely.
+local function return_to_profile_screen()
+    if not save_campaign_progress() then
+        set_status("Could not save profile. Logout cancelled.")
+        return false
+    end
+
+    has_been_airborne = false
+    current_landing_processed = false
+    show_campaign_opening_briefing = false
+    active_display_page = DISPLAY_PAGE_MISSION
+    reset_satellite_tracking(true)
+    inspect_available_profile()
+    profile_status_message = "Profile saved. Select a pilot profile to continue."
+    return true
+end
+
 local function validate_new_profile()
     local cleaned_name = string.match(
         tostring(profile_name_input or ""), "^%s*(.-)%s*$") or ""
@@ -2430,6 +2450,11 @@ function xoof_build_mission_computer_window()
 
     mission_computer_text("PILOT: " .. tostring(pilot_name or "UNKNOWN PILOT")
         .. " | PROFILE ACTIVE")
+    if imgui.Button("LOG OUT", 125, 30) then
+        return_to_profile_screen()
+        return
+    end
+    mission_computer_text("Saves progress and returns to mission computer access.")
     mission_computer_separator()
 
     for index, tab in ipairs(DISPLAY_TABS) do
