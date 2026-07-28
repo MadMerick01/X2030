@@ -2769,7 +2769,12 @@ end
 -- Alerts describe a recent event; this status describes the aircraft's current
 -- situation. It is always available as a fallback, so the surveillance area of
 -- the mission computer never becomes blank during quiet portions of a flight.
-local function current_satellite_status()
+-- Mission-computer presentation functions share one namespace so extending
+-- the interface does not consume a separate main-chunk local for every helper.
+-- Each function remains private to this script through the local table.
+local MissionComputer = {}
+
+function MissionComputer.current_satellite_status()
     if not is_required_campaign_aircraft_loaded() then
         return "SATELLITE SURVEILLANCE: STANDBY",
             "Load the Cirrus Vision SF50 to initialise coverage estimates.",
@@ -2844,7 +2849,7 @@ end
 -- that function so percent signs and other mission text are never interpreted
 -- as formatting tokens. The Text fallback keeps compatibility with bindings
 -- that expose only the upstream ImGui name.
-local function mission_computer_text(value)
+function MissionComputer.mission_computer_text(value)
     if imgui == nil then
         return
     end
@@ -2861,7 +2866,7 @@ end
 -- green confirms a usable state, amber identifies a required pilot action and
 -- red reports a fault which prevents the requested operation. Fall back to
 -- ordinary text when an older ImGui binding does not expose TextColored.
-local function mission_computer_colored_text(value, red, green, blue)
+function MissionComputer.mission_computer_colored_text(value, red, green, blue)
     if imgui ~= nil and type(imgui.TextColored) == "function" then
         imgui.TextColored(
             safe_number(red, 1.0),
@@ -2873,10 +2878,10 @@ local function mission_computer_colored_text(value, red, green, blue)
         return
     end
 
-    mission_computer_text(value)
+    MissionComputer.mission_computer_text(value)
 end
 
-local function profile_status_text(value)
+function MissionComputer.profile_status_text(value)
     local resolved_text = tostring(value or "")
     local is_fault = string.find(resolved_text, "invalid", 1, true) ~= nil
         or string.find(resolved_text, "unavailable", 1, true) ~= nil
@@ -2888,45 +2893,45 @@ local function profile_status_text(value)
         or string.find(resolved_text, "Profile saved.", 1, true) ~= nil
 
     if is_fault then
-        mission_computer_colored_text(resolved_text, 1.0, 0.15, 0.15)
+        MissionComputer.mission_computer_colored_text(resolved_text, 1.0, 0.15, 0.15)
         return
     end
 
     if is_confirmation then
-        mission_computer_colored_text(resolved_text, 0.20, 0.90, 0.42)
+        MissionComputer.mission_computer_colored_text(resolved_text, 0.20, 0.90, 0.42)
         return
     end
 
-    mission_computer_text(resolved_text)
+    MissionComputer.mission_computer_text(resolved_text)
 end
 
-local function mission_computer_separator()
+function MissionComputer.mission_computer_separator()
     if imgui ~= nil and type(imgui.Separator) == "function" then
         imgui.Separator()
     end
 end
 
-local function mission_emergency_text(value)
+function MissionComputer.mission_emergency_text(value)
     local resolved_text = tostring(value or "")
     if imgui ~= nil and type(imgui.TextColored) == "function" then
         imgui.TextColored(1.0, 0.18, 0.12, 1.0, resolved_text)
         return
     end
 
-    mission_computer_text(resolved_text)
+    MissionComputer.mission_computer_text(resolved_text)
 end
 
 -- Time-critical tracking information is mirrored on the main page so the
 -- pilot is never required to discover a lock by changing tabs. Aircraft
 -- damage takes priority and remains visible after the short impact alert ends.
-local function build_mission_satellite_emergency()
+function MissionComputer.build_mission_satellite_emergency()
     if satellite_electrical_fire_damage_active then
-        mission_emergency_text("[EMERGENCY] ACTIVE AIRCRAFT DAMAGE")
-        mission_emergency_text(
+        MissionComputer.mission_emergency_text("[EMERGENCY] ACTIVE AIRCRAFT DAMAGE")
+        MissionComputer.mission_emergency_text(
             "ENGINE FIRE | ELECTRICAL BUS 1 OFFLINE | BUS 2 OFFLINE"
         )
-        mission_emergency_text("LAND AT THE NEAREST SUITABLE AIRFIELD")
-        mission_computer_separator()
+        MissionComputer.mission_emergency_text("LAND AT THE NEAREST SUITABLE AIRFIELD")
+        MissionComputer.mission_computer_separator()
         return
     end
 
@@ -2942,96 +2947,97 @@ local function build_mission_satellite_emergency()
         )
     end
 
-    mission_emergency_text("[DANGER] DIRECTED-ENERGY TRACKING LOCK")
-    mission_emergency_text(string.format(
+    MissionComputer.mission_emergency_text("[DANGER] DIRECTED-ENERGY TRACKING LOCK")
+    MissionComputer.mission_emergency_text(string.format(
         "STRIKE SOLUTION FORMING | IMPACT WINDOW %d SEC",
         seconds_remaining
     ))
-    mission_emergency_text(
+    MissionComputer.mission_emergency_text(
         "DESCEND BELOW 1,000 FT AGL OR LEAVE COVERAGE"
     )
-    mission_computer_separator()
+    MissionComputer.mission_computer_separator()
 end
 
-local function build_opening_briefing_page()
-    mission_computer_text("CAMPAIGN OPENING BRIEFING // 06 JAN 2030")
-    mission_computer_separator()
+function MissionComputer.build_opening_briefing_page()
+    MissionComputer.mission_computer_text("CAMPAIGN OPENING BRIEFING // 06 JAN 2030")
+    MissionComputer.mission_computer_separator()
 
     for _, briefing_line in ipairs(OPENING_BRIEFING_LINES) do
-        mission_computer_text(briefing_line)
+        MissionComputer.mission_computer_text(briefing_line)
     end
 
-    mission_computer_separator()
-    mission_computer_text("PROLOGUE // THE MANAPOURI BUNKER")
-    mission_computer_text("Alignment Key 1 recovered from the shielded case.")
-    mission_computer_text("Recorded-message placeholder: manapouri_bunker_message.wav")
-    mission_computer_text("")
-    mission_computer_text("LEG 1 / 11 // THE DITCH")
-    mission_computer_text(
+    MissionComputer.mission_computer_separator()
+    MissionComputer.mission_computer_text("PROLOGUE // THE MANAPOURI BUNKER")
+    MissionComputer.mission_computer_text("Alignment Key 1 recovered from the shielded case.")
+    MissionComputer.mission_computer_text(
+        "Recorded-message placeholder: manapouri_bunker_message.wav")
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_text("LEG 1 / 11 // THE DITCH")
+    MissionComputer.mission_computer_text(
         "Fly from NZMO to YSNF Norfolk Island Airport."
     )
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "Resistance ground crew at YSNF guarantee full fuel on every visit."
     )
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "The second resistance fuel cell is waiting at YLHI Lord Howe Island."
     )
-    mission_computer_text("")
-    mission_computer_text("THREAT ADVISORY")
-    mission_computer_text(
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_text("THREAT ADVISORY")
+    MissionComputer.mission_computer_text(
         "Fuel is scarce. The AI controls Chinese and US satellite surveillance"
     )
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "networks and may have access to directed-energy systems."
     )
-    mission_computer_text("")
-    mission_computer_text(string.format(
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_text(string.format(
         "AIRCRAFT SF50 | START NZMO | FUEL %.0f KG | %s",
         get_total_fuel(),
         status_message or "STATUS UNAVAILABLE"
     ))
 end
 
-local function build_mission_page()
+function MissionComputer.build_mission_page()
     if show_campaign_opening_briefing then
-        build_opening_briefing_page()
+        MissionComputer.build_opening_briefing_page()
         return
     end
 
-    build_mission_satellite_emergency()
-    mission_computer_text("MISSION STATUS")
-    mission_computer_separator()
+    MissionComputer.build_mission_satellite_emergency()
+    MissionComputer.mission_computer_text("MISSION STATUS")
+    MissionComputer.mission_computer_separator()
     if campaign_completed then
-        mission_computer_text("THE ALIGNMENT PROTOCOL // COMPLETE")
-        mission_computer_text("FINAL LOCATION: KHAF Half Moon Bay")
-        mission_computer_text("Autonomous infrastructure authority suspended.")
-        mission_computer_text("Human authorization channels are responding.")
+        MissionComputer.mission_computer_text("THE ALIGNMENT PROTOCOL // COMPLETE")
+        MissionComputer.mission_computer_text("FINAL LOCATION: KHAF Half Moon Bay")
+        MissionComputer.mission_computer_text("Autonomous infrastructure authority suspended.")
+        MissionComputer.mission_computer_text("Human authorization channels are responding.")
     else
         local active_leg = get_active_campaign_leg()
         if active_leg ~= nil then
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text(string.format(
                 "LEG %d / %d: %s - %s",
                 campaign_leg, TOTAL_CAMPAIGN_LEGS,
                 active_leg.destination_icao, active_leg.destination_name))
-            mission_computer_text("OBJECTIVE: " .. active_leg.objective)
+            MissionComputer.mission_computer_text("OBJECTIVE: " .. active_leg.objective)
             if RESISTANCE_FULL_FUEL_AIRPORTS[active_leg.destination_icao] then
-                mission_computer_text(
+                MissionComputer.mission_computer_text(
                     "FUEL ASSURANCE: Full resistance refuel available on every visit")
             end
         else
-            mission_computer_text("CAMPAIGN OBJECTIVE UNAVAILABLE")
+            MissionComputer.mission_computer_text("CAMPAIGN OBJECTIVE UNAVAILABLE")
         end
     end
-    mission_computer_text("KEYS RECOVERED: "
+    MissionComputer.mission_computer_text("KEYS RECOVERED: "
         .. tostring(alignment_keys_recovered) .. " / "
         .. tostring(TOTAL_ALIGNMENT_KEYS))
-    mission_computer_text("LATEST: " .. tostring(latest_story_event))
-    mission_computer_text(
+    MissionComputer.mission_computer_text("LATEST: " .. tostring(latest_story_event))
+    MissionComputer.mission_computer_text(
         is_required_campaign_aircraft_loaded()
             and status_message
             or aircraft_requirement_message()
     )
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
 end
@@ -3040,16 +3046,16 @@ end
 -- leaves the mission page focused on the current story objective while pilots
 -- can review tank balance, the latest depot transfer and possible next hops in
 -- one place.
-local function build_fuel_status()
-    mission_computer_text("FUEL STATUS")
-    mission_computer_separator()
-    mission_computer_text(string.format(
+function MissionComputer.build_fuel_status()
+    MissionComputer.mission_computer_text("FUEL STATUS")
+    MissionComputer.mission_computer_separator()
+    MissionComputer.mission_computer_text(string.format(
         "TOTAL %.0f KG | LEFT %.0f KG | RIGHT %.0f KG",
         get_total_fuel(),
         number_or_zero(xoof_fuel_tanks[0]),
         number_or_zero(xoof_fuel_tanks[1])
     ))
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
 
@@ -3063,12 +3069,12 @@ local function build_fuel_status()
         selected_fuel_load_kg = clamp(
             safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
 
-        mission_computer_text("")
-        mission_computer_separator()
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text("")
+        MissionComputer.mission_computer_separator()
+        MissionComputer.mission_computer_text(string.format(
             "DEPOT SERVICE %s | AVAILABLE %.0f KG",
             tostring(pending_fuel_service.icao), depot_available))
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text(string.format(
             "SELECTED LOAD %.0f KG", selected_fuel_load_kg))
 
         if imgui ~= nil and type(imgui.Button) == "function" then
@@ -3101,9 +3107,9 @@ local function build_fuel_status()
         end
 
         if maximum_load <= 0 then
-            mission_computer_text("NO LOAD AVAILABLE // DEPOT EMPTY OR TANKS FULL")
+            MissionComputer.mission_computer_text("NO LOAD AVAILABLE // DEPOT EMPTY OR TANKS FULL")
         else
-            mission_computer_text(
+            MissionComputer.mission_computer_text(
                 "Adjust the staged quantity, then confirm one precise transfer.")
         end
     end
@@ -3113,12 +3119,13 @@ local function build_fuel_status()
             return
         end
         if last_fuel_transfer.resistance_service then
-            mission_computer_text("")
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text("")
+            MissionComputer.mission_computer_text(string.format(
                 "RESISTANCE SERVICE %s | TRANSFERRED %.0f KG",
                 tostring(last_fuel_transfer.icao or "UNKNOWN"),
                 number_or_zero(last_fuel_transfer.transferred_kg)))
-            mission_computer_text("UNLIMITED SAFE-HAVEN SUPPLY | AIRCRAFT TANKS FULL")
+            MissionComputer.mission_computer_text(
+                "UNLIMITED SAFE-HAVEN SUPPLY | AIRCRAFT TANKS FULL")
             return
         end
         local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
@@ -3134,28 +3141,28 @@ local function build_fuel_status()
                 last_fuel_transfer.aircraft_total_kg
             )
 
-        mission_computer_text("")
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text("")
+        MissionComputer.mission_computer_text(string.format(
             "DEPOT VERIFIED %.0f KG | TRANSFERRED %.0f KG",
             last_fuel_transfer.depot_before_kg,
             last_fuel_transfer.transferred_kg
         ))
-        mission_computer_text(depot_state .. " | " .. tank_state)
+        MissionComputer.mission_computer_text(depot_state .. " | " .. tank_state)
     end
 end
 
-local function build_satellite_page()
+function MissionComputer.build_satellite_page()
     local satellite_title = satellite_alert_title
     local satellite_detail = satellite_alert_detail
     local satellite_severity = satellite_alert_severity
 
     if satellite_title == nil then
         satellite_title, satellite_detail, satellite_severity =
-            current_satellite_status()
+            MissionComputer.current_satellite_status()
     end
 
-    mission_computer_text("SATELLITE COVERAGE")
-    mission_computer_separator()
+    MissionComputer.mission_computer_text("SATELLITE COVERAGE")
+    MissionComputer.mission_computer_separator()
 
     if satellite_title ~= nil then
         local alert_detail = satellite_detail or ""
@@ -3175,18 +3182,18 @@ local function build_satellite_page()
                 )
         end
 
-        mission_computer_text(
+        MissionComputer.mission_computer_text(
             "[" .. tostring(satellite_severity or "INFORMATION") .. "] "
                 .. satellite_title
         )
-        mission_computer_text(alert_detail)
+        MissionComputer.mission_computer_text(alert_detail)
     end
 
-    mission_computer_text("")
-    mission_computer_text(
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_text(
         "MASKING ALTITUDE: Remain below 1,000 ft AGL in monitored airspace"
     )
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         "THREAT: Satellite surveillance and directed-energy capability"
     )
 
@@ -3194,27 +3201,27 @@ local function build_satellite_page()
     -- than a continuously increasing danger meter. Showing the live state,
     -- deadline and most recent rolls makes that behaviour reproducible during
     -- play-testing without presenting a misleading accumulated percentage.
-    mission_computer_text("")
-    mission_computer_separator()
-    mission_computer_text("TEST TELEMETRY")
-    mission_computer_text("State: " .. tostring(satellite_state or "UNKNOWN"))
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_separator()
+    MissionComputer.mission_computer_text("TEST TELEMETRY")
+    MissionComputer.mission_computer_text("State: " .. tostring(satellite_state or "UNKNOWN"))
 
     if satellite_source_icao ~= nil then
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text(string.format(
             "Source: %s / %s",
             tostring(satellite_source_icao),
             tostring(satellite_source_class or "UNKNOWN")
         ))
     else
-        mission_computer_text("Source: NONE")
+        MissionComputer.mission_computer_text("Source: NONE")
     end
 
-    mission_computer_text(string.format(
+    MissionComputer.mission_computer_text(string.format(
         "Acquisition chance: %.0f%% per check | Checks: %d",
         math.max(0, safe_number(satellite_acquisition_chance, 0)) * 100,
         math.max(0, safe_number(satellite_acquisition_check_count, 0))
     ))
-    mission_computer_text(string.format(
+    MissionComputer.mission_computer_text(string.format(
         "Hit chance after lock: %.0f%%",
         math.max(0, safe_number(satellite_hit_chance, 0)) * 100
     ))
@@ -3235,50 +3242,50 @@ local function build_satellite_page()
         elseif satellite_state == "COOLDOWN" then
             deadline_label = "Cooldown remaining"
         end
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text(string.format(
             "%s: %d seconds",
             deadline_label,
             remaining_seconds
         ))
     else
-        mission_computer_text("Next event: NOT SCHEDULED")
+        MissionComputer.mission_computer_text("Next event: NOT SCHEDULED")
     end
 
     local masking_status = aircraft_is_above_satellite_masking_altitude()
         and "EXPOSED" or "ACTIVE"
-    mission_computer_text("Terrain masking: " .. masking_status)
+    MissionComputer.mission_computer_text("Terrain masking: " .. masking_status)
 
     if satellite_last_acquisition_roll ~= nil then
         local acquisition_result = satellite_last_acquisition_roll
                 < satellite_acquisition_chance
             and "ACQUIRED" or "NOT ACQUIRED"
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text(string.format(
             "Last acquisition roll: %.3f / below %.3f - %s",
             satellite_last_acquisition_roll,
             satellite_acquisition_chance,
             acquisition_result
         ))
     else
-        mission_computer_text("Last acquisition roll: NONE")
+        MissionComputer.mission_computer_text("Last acquisition roll: NONE")
     end
 
     if satellite_last_hit_roll ~= nil then
         local hit_result = satellite_last_hit_roll < satellite_hit_chance
             and "HIT" or "MISS"
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text(string.format(
             "Last hit roll: %.3f / below %.3f - %s",
             satellite_last_hit_roll,
             satellite_hit_chance,
             hit_result
         ))
     else
-        mission_computer_text("Last hit roll: NONE")
+        MissionComputer.mission_computer_text("Last hit roll: NONE")
     end
 end
 
-local function build_hops_page()
-    mission_computer_text("SUGGESTED NEXT HOPS")
-    mission_computer_separator()
+function MissionComputer.build_hops_page()
+    MissionComputer.mission_computer_text("SUGGESTED NEXT HOPS")
+    MissionComputer.mission_computer_separator()
 
     -- A full X-Plane nav-aid scan is deliberately pilot-initiated in flight:
     -- it avoids repeatedly performing an expensive search in the update loop,
@@ -3288,12 +3295,12 @@ local function build_hops_page()
         and imgui.Button("UPDATE NEAREST 3", 190, 30) then
         refresh_airport_suggestions()
     end
-    mission_computer_text(
+    MissionComputer.mission_computer_text(
         xoof_on_ground == 0
             and "IN-FLIGHT LIST RETAINED // Update on demand as position changes."
             or "Update on demand to recalculate from the present position."
     )
-    mission_computer_text("")
+    MissionComputer.mission_computer_text("")
 
     for index = 1, 3 do
         local airport = suggested_airports[index]
@@ -3337,7 +3344,7 @@ local function build_hops_page()
                 number_or_zero(airport.available_fuel)
             )
 
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text(string.format(
                 "%d. %s | %.0f NM | HDG %03.0f | %s",
                 index,
                 tostring(airport.icao or "UNKNOWN"),
@@ -3345,25 +3352,25 @@ local function build_hops_page()
                 number_or_zero(airport.heading),
                 affordability
             ))
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text(string.format(
                 "   EST %.0f KG | %s | DEPOT %.0f KG%s",
                 number_or_zero(airport.required_fuel),
                 runway_length_text,
                 depot_fuel,
                 reserve_description
             ))
-            mission_computer_text("")
+            MissionComputer.mission_computer_text("")
         else
-            mission_computer_text(tostring(index) .. ". No airport found")
-            mission_computer_text("")
+            MissionComputer.mission_computer_text(tostring(index) .. ". No airport found")
+            MissionComputer.mission_computer_text("")
         end
     end
 end
 
-local function build_fuel_page()
-    build_fuel_status()
-    mission_computer_text("")
-    build_hops_page()
+function MissionComputer.build_fuel_page()
+    MissionComputer.build_fuel_status()
+    MissionComputer.mission_computer_text("")
+    MissionComputer.build_hops_page()
 end
 
 -- This builder is intentionally global because FlyWithLua resolves ImGui
@@ -3374,24 +3381,24 @@ function xoof_build_mission_computer_window()
         return
     end
 
-    mission_computer_text(PLUGIN_NAME .. " // " .. CAMPAIGN_SUBTITLE)
-    mission_computer_separator()
+    MissionComputer.mission_computer_text(PLUGIN_NAME .. " // " .. CAMPAIGN_SUBTITLE)
+    MissionComputer.mission_computer_separator()
 
     if profile_screen_active then
-        mission_computer_text("MISSION COMPUTER ACCESS")
-        profile_status_text(profile_status_message)
-        mission_computer_separator()
+        MissionComputer.mission_computer_text("MISSION COMPUTER ACCESS")
+        MissionComputer.profile_status_text(profile_status_message)
+        MissionComputer.mission_computer_separator()
 
-        mission_computer_text("CREATE NEW PILOT PROFILE")
-        mission_computer_colored_text(
+        MissionComputer.mission_computer_text("CREATE NEW PILOT PROFILE")
+        MissionComputer.mission_computer_colored_text(
             "FLIGHT SETUP REQUIRED", 1.0, 0.72, 0.20)
-        mission_computer_colored_text(
+        MissionComputer.mission_computer_colored_text(
             "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau,",
             1.0, 0.72, 0.20)
-        mission_computer_colored_text(
+        MissionComputer.mission_computer_colored_text(
             "New Zealand, before creating a pilot profile.",
             1.0, 0.72, 0.20)
-        mission_computer_text("")
+        MissionComputer.mission_computer_text("")
         if type(imgui.InputText) == "function" then
             local first_value, second_value = imgui.InputText(
                 "NAME", profile_name_input, 33)
@@ -3401,16 +3408,17 @@ function xoof_build_mission_computer_window()
                 profile_name_input = second_value
             end
         else
-            mission_computer_text("Name entry unavailable: ImGui InputText missing.")
+            MissionComputer.mission_computer_text(
+                "Name entry unavailable: ImGui InputText missing.")
         end
 
-        mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
-        mission_computer_text(string.format(
+        MissionComputer.mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
+        MissionComputer.mission_computer_text(string.format(
             "INITIAL FUEL: %d KG", INITIAL_CAMPAIGN_FUEL_KG))
 
         if overwrite_confirmation_active then
-            mission_computer_text("")
-            mission_computer_text("AN EXISTING PROFILE WILL BE REPLACED")
+            MissionComputer.mission_computer_text("")
+            MissionComputer.mission_computer_text("AN EXISTING PROFILE WILL BE REPLACED")
             if imgui.Button("CANCEL", 150, 30) then
                 overwrite_confirmation_active = false
                 profile_status_message = "Profile replacement cancelled."
@@ -3423,44 +3431,44 @@ function xoof_build_mission_computer_window()
             request_new_profile_creation()
         end
 
-        mission_computer_separator()
-        mission_computer_text("LOAD EXISTING PROFILE")
+        MissionComputer.mission_computer_separator()
+        MissionComputer.mission_computer_text("LOAD EXISTING PROFILE")
         if available_saved_campaign ~= nil then
             local saved_fuel_total = 0
             for tank = 0, 1 do
                 saved_fuel_total = saved_fuel_total
                     + number_or_zero(available_saved_campaign.fuel_tanks[tank])
             end
-            mission_computer_text("PILOT: "
+            MissionComputer.mission_computer_text("PILOT: "
                 .. tostring(available_saved_campaign.pilot_name))
-            mission_computer_colored_text(string.format(
+            MissionComputer.mission_computer_colored_text(string.format(
                 "RESUME LOCATION REQUIRED: %s",
                 available_saved_campaign.current_airport),
                 1.0, 0.72, 0.20)
-            mission_computer_colored_text(
+            MissionComputer.mission_computer_colored_text(
                 "Load the Cirrus Vision SF50 there before loading this profile.",
                 1.0, 0.72, 0.20)
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text(string.format(
                 "SAVED FUEL: %.0f KG", saved_fuel_total))
             if imgui.Button("LOAD PROFILE", 190, 30) then
                 load_existing_profile()
             end
         else
-            mission_computer_text(available_save_error == "invalid"
+            MissionComputer.mission_computer_text(available_save_error == "invalid"
                 and "PROFILE DATA COULD NOT BE VERIFIED"
                 or "NO EXISTING PROFILE DETECTED")
         end
         return
     end
 
-    mission_computer_text("PILOT: " .. tostring(pilot_name or "UNKNOWN PILOT")
+    MissionComputer.mission_computer_text("PILOT: " .. tostring(pilot_name or "UNKNOWN PILOT")
         .. " | PROFILE ACTIVE")
     if imgui.Button("LOG OUT", 125, 30) then
         return_to_profile_screen()
         return
     end
-    mission_computer_text("Saves progress and returns to mission computer access.")
-    mission_computer_separator()
+    MissionComputer.mission_computer_text("Saves progress and returns to mission computer access.")
+    MissionComputer.mission_computer_separator()
 
     for index, tab in ipairs(DISPLAY_TABS) do
         local button_label = tab.label
@@ -3478,28 +3486,28 @@ function xoof_build_mission_computer_window()
         end
     end
 
-    mission_computer_separator()
+    MissionComputer.mission_computer_separator()
 
     if active_display_page == DISPLAY_PAGE_HOPS then
-        build_fuel_page()
+        MissionComputer.build_fuel_page()
     elseif active_display_page == DISPLAY_PAGE_SATELLITE then
-        build_satellite_page()
+        MissionComputer.build_satellite_page()
     elseif active_display_page == DISPLAY_PAGE_MAINTENANCE then
-        mission_computer_text("MAINTENANCE")
-        mission_computer_separator()
-        mission_computer_text("AIRCRAFT REPAIR")
-        mission_computer_text("Full systems repair is available while safely")
-        mission_computer_text("parked at a recognised airport.")
-        mission_computer_text(
+        MissionComputer.mission_computer_text("MAINTENANCE")
+        MissionComputer.mission_computer_separator()
+        MissionComputer.mission_computer_text("AIRCRAFT REPAIR")
+        MissionComputer.mission_computer_text("Full systems repair is available while safely")
+        MissionComputer.mission_computer_text("parked at a recognised airport.")
+        MissionComputer.mission_computer_text(
             "Repair clears failures only. Airport fuel reserves are not affected."
         )
-        mission_computer_text("")
+        MissionComputer.mission_computer_text("")
 
         local repair_available, repair_detail =
             get_aircraft_repair_eligibility()
 
         if repair_available then
-            mission_computer_colored_text(
+            MissionComputer.mission_computer_colored_text(
                 "REPAIR FACILITY AVAILABLE // " .. repair_detail,
                 0.20, 0.90, 0.42
             )
@@ -3507,7 +3515,7 @@ function xoof_build_mission_computer_window()
             -- Do not leave a previous airport's completion confirmation on
             -- screen after the aircraft is moved or restarted.
             maintenance_status_message = nil
-            mission_computer_colored_text(
+            MissionComputer.mission_computer_colored_text(
                 "REPAIR UNAVAILABLE // " .. repair_detail,
                 1.0, 0.72, 0.20
             )
@@ -3518,32 +3526,32 @@ function xoof_build_mission_computer_window()
         end
 
         if maintenance_status_message ~= nil then
-            mission_computer_text(maintenance_status_message)
+            MissionComputer.mission_computer_text(maintenance_status_message)
         end
     elseif active_display_page == DISPLAY_PAGE_KEYS then
-        mission_computer_text("ALIGNMENT KEYS")
-        mission_computer_separator()
-        mission_computer_text("RECOVERED: "
+        MissionComputer.mission_computer_text("ALIGNMENT KEYS")
+        MissionComputer.mission_computer_separator()
+        MissionComputer.mission_computer_text("RECOVERED: "
             .. tostring(alignment_keys_recovered) .. " / "
             .. tostring(TOTAL_ALIGNMENT_KEYS))
         for key_number = 1, TOTAL_ALIGNMENT_KEYS do
             local key_status = key_number <= alignment_keys_recovered
                 and "RECOVERED" or "OUTSTANDING"
-            mission_computer_text(string.format(
+            MissionComputer.mission_computer_text(string.format(
                 "KEY %d // %s", key_number, key_status))
         end
-        mission_computer_text("")
-        mission_computer_text("ALIGNMENT PROTOCOL: "
+        MissionComputer.mission_computer_text("")
+        MissionComputer.mission_computer_text("ALIGNMENT PROTOCOL: "
             .. (alignment_protocol_assembled and "ASSEMBLED" or "NOT ASSEMBLED"))
-        mission_computer_text("FINAL TRANSFER: "
+        MissionComputer.mission_computer_text("FINAL TRANSFER: "
             .. (campaign_completed and "ACCEPTED" or "PENDING"))
     else
         active_display_page = DISPLAY_PAGE_MISSION
-        build_mission_page()
+        MissionComputer.build_mission_page()
     end
 end
 
-local function create_mission_computer_window()
+function MissionComputer.create_mission_computer_window()
     -- FlyWithLua NG+ supplies these window functions. Guard every entry point
     -- so an incomplete installation cannot stop campaign update callbacks.
     if type(float_wnd_create) ~= "function"
@@ -3586,7 +3594,7 @@ do_often("xoof_update()")
 do_on_exit("xoof_save_before_exit()")
 
 load_campaign_sounds()
-create_mission_computer_window()
+MissionComputer.create_mission_computer_window()
 
 if load_valid_land_airports() then
     inspect_available_profile()
