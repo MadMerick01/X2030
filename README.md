@@ -1,4 +1,5 @@
 <img width="1672" height="941" alt="Jetwithbreifcase" src="https://github.com/user-attachments/assets/1542508a-3975-4c5c-a17e-2635ce368a7e" />
+
 ## How to Play
 
 1. Download the latest release file.
