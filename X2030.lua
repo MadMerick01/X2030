@@ -141,9 +141,11 @@ local LEGACY_CAMPAIGN_SAVE_PATH =
 -- GAME SETTINGS
 ------------------------------------------------------------
 
-local INITIAL_CAMPAIGN_FUEL_KG = 40
-local MINIMUM_STARTING_FUEL_KG = 20
-local MAXIMUM_STARTING_FUEL_KG = 100
+local INITIAL_CAMPAIGN_FUEL_KG = 100
+-- Versions 2-4 allowed pilots to choose a starting allocation. Retain these
+-- bounds only so profiles created by those versions remain loadable.
+local LEGACY_MINIMUM_STARTING_FUEL_KG = 20
+local LEGACY_MAXIMUM_STARTING_FUEL_KG = 100
 local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
 local POUNDS_PER_KILOGRAM = 2.2046226218
 local FUEL_SAVE_INTERVAL_SECONDS = 30
@@ -309,7 +311,6 @@ local alignment_protocol_assembled = false
 local campaign_completed = false
 local latest_story_event = "Alignment Key 1 recovered from the Manapouri bunker."
 local profile_name_input = ""
-local profile_fuel_input = INITIAL_CAMPAIGN_FUEL_KG
 local profile_status_message = "Select or create a pilot profile."
 local available_saved_campaign = nil
 local available_save_error = nil
@@ -735,8 +736,8 @@ local function load_campaign_save()
             or string.find(saved_name, "[^%w%s%-%']")
             or not is_number(saved_starting_fuel)
             or saved_starting_fuel ~= math.floor(saved_starting_fuel)
-            or saved_starting_fuel < MINIMUM_STARTING_FUEL_KG
-            or saved_starting_fuel > MAXIMUM_STARTING_FUEL_KG then
+            or saved_starting_fuel < LEGACY_MINIMUM_STARTING_FUEL_KG
+            or saved_starting_fuel > LEGACY_MAXIMUM_STARTING_FUEL_KG then
             return nil, "invalid", loaded_save_path
         end
     end
@@ -1972,18 +1973,12 @@ end
 -- A new campaign begins with an exact, deliberately scarce fuel load. Clear
 -- every simulator tank first so fuel configured in X-Plane cannot carry into
 -- the campaign, then balance the starting load across the SF50's two tanks.
-local function set_initial_campaign_fuel(starting_fuel_kg)
-    local safe_starting_fuel = clamp(
-        starting_fuel_kg,
-        MINIMUM_STARTING_FUEL_KG,
-        MAXIMUM_STARTING_FUEL_KG
-    )
-
+local function set_initial_campaign_fuel()
     for tank = 0, 1 do
         xoof_fuel_tanks[tank] = 0
     end
 
-    return add_balanced_fuel(safe_starting_fuel)
+    return add_balanced_fuel(INITIAL_CAMPAIGN_FUEL_KG)
 end
 
 ------------------------------------------------------------
@@ -2039,16 +2034,6 @@ local function validate_new_profile()
             "Enter a name of 2-32 letters, numbers, spaces, hyphens or apostrophes."
     end
 
-    local requested_fuel = tonumber(profile_fuel_input)
-    if not is_number(requested_fuel)
-        or requested_fuel ~= math.floor(requested_fuel)
-        or requested_fuel < MINIMUM_STARTING_FUEL_KG
-        or requested_fuel > MAXIMUM_STARTING_FUEL_KG then
-        return nil, string.format(
-            "Starting fuel must be a whole number from %d to %d kg.",
-            MINIMUM_STARTING_FUEL_KG, MAXIMUM_STARTING_FUEL_KG)
-    end
-
     if not is_required_campaign_aircraft_loaded() then
         return nil, aircraft_requirement_message()
     end
@@ -2062,11 +2047,12 @@ local function validate_new_profile()
 
     local _, aircraft_capacity_kg =
         get_aircraft_remaining_fuel_capacity_kg()
-    if aircraft_capacity_kg == nil or requested_fuel > aircraft_capacity_kg then
+    if aircraft_capacity_kg == nil
+        or INITIAL_CAMPAIGN_FUEL_KG > aircraft_capacity_kg then
         return nil, "Starting fuel exceeds the loaded aircraft capacity."
     end
 
-    return { name = cleaned_name, starting_fuel_kg = requested_fuel }
+    return { name = cleaned_name }
 end
 
 local function create_new_profile()
@@ -2084,7 +2070,7 @@ local function create_new_profile()
     end
 
     pilot_name = new_profile.name
-    campaign_starting_fuel_kg = new_profile.starting_fuel_kg
+    campaign_starting_fuel_kg = INITIAL_CAMPAIGN_FUEL_KG
     departure_airport = CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
     campaign_leg = 1
@@ -2094,7 +2080,7 @@ local function create_new_profile()
     latest_story_event =
         "Alignment Key 1 recovered from the Manapouri bunker."
     show_campaign_opening_briefing = true
-    set_initial_campaign_fuel(campaign_starting_fuel_kg)
+    set_initial_campaign_fuel()
     get_or_create_airport_fuel(
         departure_airport, get_longest_runway_metres(departure_airport))
 
@@ -2802,24 +2788,10 @@ function xoof_build_mission_computer_window()
             mission_computer_text("Name entry unavailable: ImGui InputText missing.")
         end
 
-        if type(imgui.InputInt) == "function" then
-            local first_value, second_value = imgui.InputInt(
-                "STARTING FUEL (KG)", profile_fuel_input, 1, 10)
-            if type(first_value) == "number" then
-                profile_fuel_input = first_value
-            elseif type(second_value) == "number" then
-                profile_fuel_input = second_value
-            end
-        else
-            mission_computer_text("Fuel entry unavailable: ImGui InputInt missing.")
-        end
-
         mission_computer_text("ORIGIN: NZMO - MANAPOURI / TE ANAU, NEW ZEALAND")
         mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
         mission_computer_text(string.format(
-            "ALLOCATION: %d-%d KG | STANDARD: %d KG",
-            MINIMUM_STARTING_FUEL_KG, MAXIMUM_STARTING_FUEL_KG,
-            INITIAL_CAMPAIGN_FUEL_KG))
+            "INITIAL FUEL: %d KG", INITIAL_CAMPAIGN_FUEL_KG))
 
         if overwrite_confirmation_active then
             mission_computer_text("")
