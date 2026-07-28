@@ -1,5 +1,5 @@
 -- X2030
--- Prototype 0.8
+-- Prototype 0.9
 -- Airport fuel, next-hop suggestions and satellite surveillance
 
 local PLUGIN_NAME = "X2030"
@@ -185,6 +185,9 @@ local SATELLITE_TRANSITION_MESSAGE_SECONDS = 6
 local SATELLITE_CLEARED_MESSAGE_SECONDS = 5
 local SATELLITE_STRIKE_MESSAGE_SECONDS = 12
 local SATELLITE_NEAR_COVERAGE_NM = 10
+-- X-Plane failure datarefs use 6 for an inoperative system. Keep the value
+-- named so later damage packages do not scatter an unexplained magic number.
+local XPLANE_FAILURE_INOPERATIVE = 6
 local METRES_PER_FOOT = 0.3048
 
 -- FlyWithLua's script directory ends with the platform-specific separator.
@@ -195,6 +198,11 @@ local SATELLITE_COVERAGE_ALERT_PATH =
     .. "Sounds"
     .. DIRECTORY_SEPARATOR
     .. "Satallite_coverage_alert.wav"
+local SATELLITE_HIT_SOUND_PATH =
+    SCRIPT_DIRECTORY
+    .. "Sounds"
+    .. DIRECTORY_SEPARATOR
+    .. "laser_hit1.wav"
 
 -- Recording placeholders. The campaign continues with on-screen text until the
 -- pilot supplies these WAV files; project_brief.md preserves the recording copy.
@@ -300,6 +308,26 @@ xoof_fuel_tanks = dataref_table(
     "sim/flightmodel/weight/m_fuel"
 )
 
+-- The first satellite damage package is deliberately specific to the SF50:
+-- both electrical buses fail and its single engine catches fire.
+dataref(
+    "xoof_failure_bus_1",
+    "sim/operation/failures/rel_esys",
+    "writable"
+)
+
+dataref(
+    "xoof_failure_bus_2",
+    "sim/operation/failures/rel_esys2",
+    "writable"
+)
+
+dataref(
+    "xoof_failure_engine_1_fire",
+    "sim/operation/failures/rel_engfir0",
+    "writable"
+)
+
 ------------------------------------------------------------
 -- CAMPAIGN STATE
 ------------------------------------------------------------
@@ -361,6 +389,8 @@ local satellite_alert_expires_at = nil
 local satellite_alert_severity = nil
 local satellite_proximity = nil
 local satellite_coverage_alert_sound = nil
+local satellite_hit_sound = nil
+local satellite_electrical_fire_damage_active = false
 local manapouri_message_sound = nil
 local half_moon_bay_message_sound = nil
 
@@ -437,6 +467,11 @@ local function load_campaign_sounds()
         "satellite coverage alert",
         false
     )
+    satellite_hit_sound = load_campaign_sound(
+        SATELLITE_HIT_SOUND_PATH,
+        "satellite strike impact",
+        false
+    )
 
     -- These two files are intentional placeholders. Fail quietly apart from a
     -- log entry until the recorded campaign messages are added later.
@@ -468,6 +503,17 @@ local function play_satellite_coverage_alert()
     local played_ok = pcall(play_sound, satellite_coverage_alert_sound)
     if not played_ok then
         logMsg("[X2030 AUDIO] Could not play satellite coverage alert.")
+    end
+end
+
+local function play_satellite_hit_sound()
+    if satellite_hit_sound == nil then
+        return
+    end
+
+    local played_ok = pcall(play_sound, satellite_hit_sound)
+    if not played_ok then
+        logMsg("[X2030 AUDIO] Could not play satellite strike impact.")
     end
 end
 
@@ -1619,6 +1665,23 @@ local function satellite_source_is_still_covered(coverage)
         and coverage.class == satellite_source_class
 end
 
+-- Apply the first strike outcome exactly once. Advancing the satellite state
+-- immediately after this call prevents the frequently-running update callback
+-- from repeatedly writing failures or replaying the impact sound.
+local function apply_satellite_electrical_fire_damage()
+    xoof_failure_bus_1 = XPLANE_FAILURE_INOPERATIVE
+    xoof_failure_bus_2 = XPLANE_FAILURE_INOPERATIVE
+    xoof_failure_engine_1_fire = XPLANE_FAILURE_INOPERATIVE
+    satellite_electrical_fire_damage_active = true
+    play_satellite_hit_sound()
+
+    logMsg(
+        "[X2030 SATELLITE] Damage applied: electrical buses 1 and 2 "
+            .. "inoperative; engine 1 fire."
+    )
+    return true
+end
+
 local function update_satellite_surveillance()
     advance_satellite_event_time()
     clear_satellite_alert_if_expired()
@@ -1674,9 +1737,10 @@ local function update_satellite_surveillance()
             return
         elseif satellite_deadline_reached(satellite_next_event_time) then
             if math.random() < satellite_hit_chance then
+                apply_satellite_electrical_fire_damage()
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - HIT",
-                    "Aircraft impact detected.",
+                    "Bus 1 and Bus 2 offline. Engine fire detected.",
                     SATELLITE_STRIKE_MESSAGE_SECONDS,
                     "DANGER"
                 )
@@ -2629,6 +2693,53 @@ local function mission_computer_separator()
     end
 end
 
+local function mission_emergency_text(value)
+    local resolved_text = tostring(value or "")
+    if imgui ~= nil and type(imgui.TextColored) == "function" then
+        imgui.TextColored(1.0, 0.18, 0.12, 1.0, resolved_text)
+        return
+    end
+
+    mission_computer_text(resolved_text)
+end
+
+-- Time-critical tracking information is mirrored on the main page so the
+-- pilot is never required to discover a lock by changing tabs. Aircraft
+-- damage takes priority and remains visible after the short impact alert ends.
+local function build_mission_satellite_emergency()
+    if satellite_electrical_fire_damage_active then
+        mission_emergency_text("[EMERGENCY] ACTIVE AIRCRAFT DAMAGE")
+        mission_emergency_text(
+            "ENGINE FIRE | ELECTRICAL BUS 1 OFFLINE | BUS 2 OFFLINE"
+        )
+        mission_emergency_text("LAND AT THE NEAREST SUITABLE AIRFIELD")
+        mission_computer_separator()
+        return
+    end
+
+    if satellite_state ~= "LOCKED" then
+        return
+    end
+
+    local seconds_remaining = 0
+    if satellite_next_event_time ~= nil then
+        seconds_remaining = math.max(
+            0,
+            math.ceil(satellite_next_event_time - satellite_event_time)
+        )
+    end
+
+    mission_emergency_text("[DANGER] DIRECTED-ENERGY TRACKING LOCK")
+    mission_emergency_text(string.format(
+        "STRIKE SOLUTION FORMING | IMPACT WINDOW %d SEC",
+        seconds_remaining
+    ))
+    mission_emergency_text(
+        "DESCEND BELOW 1,000 FT AGL OR LEAVE COVERAGE"
+    )
+    mission_computer_separator()
+end
+
 local function build_opening_briefing_page()
     mission_computer_text("CAMPAIGN OPENING BRIEFING // 06 JAN 2030")
     mission_computer_separator()
@@ -2674,6 +2785,7 @@ local function build_mission_page()
         return
     end
 
+    build_mission_satellite_emergency()
     mission_computer_text("MISSION STATUS")
     mission_computer_separator()
     if campaign_completed then
@@ -3085,5 +3197,5 @@ end
 
 logMsg(
     "[X2030] "
-    .. "Prototype 0.6 satellite surveillance system loaded."
+    .. "Prototype 0.9 satellite strike damage system loaded."
 )
