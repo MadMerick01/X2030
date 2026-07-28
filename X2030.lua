@@ -2218,9 +2218,11 @@ function xoof_update()
             show_campaign_opening_briefing = false
             current_landing_processed =
                 false
-            -- Airport intelligence is intentionally ground-supplied. Remove
-            -- the departure list rather than presenting stale airborne data.
-            suggested_airports = {}
+
+            -- Keep the last verified suggestions available after takeoff. The
+            -- pilot can request a fresh nearest-airport scan from the fuel
+            -- page as the flight progresses, rather than losing useful
+            -- diversion information at the moment it is needed most.
 
             if departure_airport ~= nil then
                 set_status(
@@ -2684,6 +2686,21 @@ end
 local function build_hops_page()
     mission_computer_text("SUGGESTED NEXT HOPS")
     mission_computer_separator()
+
+    -- A full X-Plane nav-aid scan is deliberately pilot-initiated in flight:
+    -- it avoids repeatedly performing an expensive search in the update loop,
+    -- while allowing the displayed three airports to follow the aircraft.
+    if imgui ~= nil
+        and type(imgui.Button) == "function"
+        and imgui.Button("UPDATE NEAREST 3", 190, 30) then
+        refresh_airport_suggestions()
+    end
+    mission_computer_text(
+        xoof_on_ground == 0
+            and "IN-FLIGHT LIST RETAINED // Update on demand as position changes."
+            or "Update on demand to recalculate from the present position."
+    )
+    mission_computer_text("")
 
     for index = 1, 3 do
         local airport = suggested_airports[index]
