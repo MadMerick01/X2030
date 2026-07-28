@@ -152,10 +152,10 @@ local FUEL_SAVE_INTERVAL_SECONDS = 30
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
--- Suggestions require a measurable conventional runway, not merely an airport
--- nav-aid entry. This modest floor keeps helipads and malformed runway records
--- out without treating every very short airfield as SF50-suitable.
-local MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES = 300
+-- Suggestions require a measurable conventional runway at least as long as the
+-- SF50's reported minimum takeoff distance. Pilots must still account for
+-- runway condition, elevation, weather and aircraft loading.
+local MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES = 650
 -- Duplicate airport identifiers can exist in third-party scenery. A nav-aid
 -- must therefore also be close to the runway recorded for that identifier.
 local MAX_NAV_AID_TO_RUNWAY_DISTANCE_KM = 5.0

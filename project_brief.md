@@ -354,7 +354,7 @@ The current FlyWithLua prototype can:
 * transfer available airport fuel after landing at a different airport
 * split the fuel evenly between the left and right tanks
 * identify three nearby suggested airports
-* require suggestions to have a measurable conventional runway of at least 300 m
+* require suggestions to have a measurable conventional runway of at least 650 m
 * display each suggested airport’s ICAO code
 * display distance in nautical miles
 * display approximate heading
