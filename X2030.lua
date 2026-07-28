@@ -2458,6 +2458,24 @@ local function mission_computer_text(value)
     end
 end
 
+-- Reserve red text for the location mismatch that prevents a saved profile
+-- from loading. Fall back to ordinary text if an older ImGui binding does not
+-- expose TextColored, so the access screen remains usable on every install.
+local function profile_status_text(value)
+    local resolved_text = tostring(value or "")
+    local is_resume_location_warning = string.match(
+        resolved_text, "^Load the SF50 at .+ to resume this profile%.$") ~= nil
+
+    if is_resume_location_warning
+        and imgui ~= nil
+        and type(imgui.TextColored) == "function" then
+        imgui.TextColored(1.0, 0.15, 0.15, 1.0, resolved_text)
+        return
+    end
+
+    mission_computer_text(resolved_text)
+end
+
 local function mission_computer_separator()
     if imgui ~= nil and type(imgui.Separator) == "function" then
         imgui.Separator()
@@ -2731,7 +2749,7 @@ function xoof_build_mission_computer_window()
 
     if profile_screen_active then
         mission_computer_text("MISSION COMPUTER ACCESS")
-        mission_computer_text(profile_status_message)
+        profile_status_text(profile_status_message)
         mission_computer_separator()
 
         mission_computer_text("CREATE NEW PILOT PROFILE")
