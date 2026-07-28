@@ -285,6 +285,10 @@ The current FlyWithLua prototype can:
 * exclude heliports
 * exclude seaplane bases
 * display information through a styled near-future interface
+* present a pilot profile start page before campaign systems become active
+* create a named pilot at NZMO with a validated 20-100 kg starting allocation
+* explicitly load an existing local profile at its saved airport
+* preserve legacy saves and back up a profile before confirmed replacement
 
 ---
 
