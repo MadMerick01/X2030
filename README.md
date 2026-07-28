@@ -22,7 +22,10 @@ X-Plane 12/
 
 4. Start X-Plane 12.
 5. Select the **Cirrus Vision SF50**.
-6. Load your flight and follow the on-screen mission instructions.
+6. For a new campaign, load at **NZMO — Manapouri / Te Anau Airport, New
+   Zealand**. To resume a campaign, load at the saved airport shown by the
+   mission computer.
+7. Follow the on-screen mission instructions.
 
 
 # X2030

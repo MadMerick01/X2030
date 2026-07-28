@@ -2259,7 +2259,9 @@ local function validate_new_profile()
     if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO
         or not is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
-        return nil, "Position the aircraft at NZMO to create a profile."
+        return nil,
+            "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau "
+            .. "to create a profile."
     end
 
     local _, aircraft_capacity_kg =
@@ -2352,7 +2354,7 @@ local function load_existing_profile()
     if nearest_airport ~= available_saved_campaign.current_airport
         or not is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
-        profile_status_message = "Load the SF50 at "
+        profile_status_message = "Load the Cirrus Vision SF50 at "
             .. available_saved_campaign.current_airport
             .. " to resume this profile."
         return false
@@ -2683,18 +2685,43 @@ local function mission_computer_text(value)
     end
 end
 
--- Reserve red text for the location mismatch that prevents a saved profile
--- from loading. Fall back to ordinary text if an older ImGui binding does not
--- expose TextColored, so the access screen remains usable on every install.
+-- Important access-screen information uses restrained semantic colours:
+-- green confirms a usable state, amber identifies a required pilot action and
+-- red reports a fault which prevents the requested operation. Fall back to
+-- ordinary text when an older ImGui binding does not expose TextColored.
+local function mission_computer_colored_text(value, red, green, blue)
+    if imgui ~= nil and type(imgui.TextColored) == "function" then
+        imgui.TextColored(
+            safe_number(red, 1.0),
+            safe_number(green, 1.0),
+            safe_number(blue, 1.0),
+            1.0,
+            tostring(value or "")
+        )
+        return
+    end
+
+    mission_computer_text(value)
+end
+
 local function profile_status_text(value)
     local resolved_text = tostring(value or "")
-    local is_resume_location_warning = string.match(
-        resolved_text, "^Load the SF50 at .+ to resume this profile%.$") ~= nil
+    local is_fault = string.find(resolved_text, "invalid", 1, true) ~= nil
+        or string.find(resolved_text, "unavailable", 1, true) ~= nil
+        or string.find(resolved_text, "could not", 1, true) ~= nil
+        or string.find(resolved_text, "Load the ", 1, true) == 1
+        or string.find(resolved_text, "Position the aircraft", 1, true) == 1
+    local is_confirmation = string.find(
+        resolved_text, "Existing pilot profile detected.", 1, true) ~= nil
+        or string.find(resolved_text, "Profile saved.", 1, true) ~= nil
 
-    if is_resume_location_warning
-        and imgui ~= nil
-        and type(imgui.TextColored) == "function" then
-        imgui.TextColored(1.0, 0.15, 0.15, 1.0, resolved_text)
+    if is_fault then
+        mission_computer_colored_text(resolved_text, 1.0, 0.15, 0.15)
+        return
+    end
+
+    if is_confirmation then
+        mission_computer_colored_text(resolved_text, 0.20, 0.90, 0.42)
         return
     end
 
@@ -3126,6 +3153,15 @@ function xoof_build_mission_computer_window()
         mission_computer_separator()
 
         mission_computer_text("CREATE NEW PILOT PROFILE")
+        mission_computer_colored_text(
+            "FLIGHT SETUP REQUIRED", 1.0, 0.72, 0.20)
+        mission_computer_colored_text(
+            "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau,",
+            1.0, 0.72, 0.20)
+        mission_computer_colored_text(
+            "New Zealand, before creating a pilot profile.",
+            1.0, 0.72, 0.20)
+        mission_computer_text("")
         if type(imgui.InputText) == "function" then
             local first_value, second_value = imgui.InputText(
                 "NAME", profile_name_input, 33)
@@ -3138,7 +3174,6 @@ function xoof_build_mission_computer_window()
             mission_computer_text("Name entry unavailable: ImGui InputText missing.")
         end
 
-        mission_computer_text("ORIGIN: NZMO - MANAPOURI / TE ANAU, NEW ZEALAND")
         mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
         mission_computer_text(string.format(
             "INITIAL FUEL: %d KG", INITIAL_CAMPAIGN_FUEL_KG))
@@ -3168,9 +3203,15 @@ function xoof_build_mission_computer_window()
             end
             mission_computer_text("PILOT: "
                 .. tostring(available_saved_campaign.pilot_name))
+            mission_computer_colored_text(string.format(
+                "RESUME LOCATION REQUIRED: %s",
+                available_saved_campaign.current_airport),
+                1.0, 0.72, 0.20)
+            mission_computer_colored_text(
+                "Load the Cirrus Vision SF50 there before loading this profile.",
+                1.0, 0.72, 0.20)
             mission_computer_text(string.format(
-                "LOCATION: %s | SAVED FUEL: %.0f KG",
-                available_saved_campaign.current_airport, saved_fuel_total))
+                "SAVED FUEL: %.0f KG", saved_fuel_total))
             if imgui.Button("LOAD PROFILE", 190, 30) then
                 load_existing_profile()
             end
