@@ -2209,14 +2209,24 @@ local function build_mission_page()
             and status_message
             or aircraft_requirement_message()
     )
-    mission_computer_text("")
+    mission_computer_text(
+        "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
+    )
+end
+
+-- Keep all operational fuel information together on the fuel page. This
+-- leaves the mission page focused on the current story objective while pilots
+-- can review tank balance, the latest depot transfer and possible next hops in
+-- one place.
+local function build_fuel_status()
+    mission_computer_text("FUEL STATUS")
+    mission_computer_separator()
     mission_computer_text(string.format(
-        "FUEL %.0f KG | LEFT %.0f | RIGHT %.0f",
+        "TOTAL %.0f KG | LEFT %.0f KG | RIGHT %.0f KG",
         get_total_fuel(),
         number_or_zero(xoof_fuel_tanks[0]),
         number_or_zero(xoof_fuel_tanks[1])
     ))
-
     mission_computer_text(
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
@@ -2361,6 +2371,12 @@ local function build_hops_page()
     end
 end
 
+local function build_fuel_page()
+    build_fuel_status()
+    mission_computer_text("")
+    build_hops_page()
+end
+
 -- This builder is intentionally global because FlyWithLua resolves ImGui
 -- callbacks by name. All mission information and interaction are confined to
 -- this movable window, leaving the SF50's 3-D cockpit manipulators untouched.
@@ -2476,7 +2492,7 @@ function xoof_build_mission_computer_window()
     mission_computer_separator()
 
     if active_display_page == DISPLAY_PAGE_HOPS then
-        build_hops_page()
+        build_fuel_page()
     elseif active_display_page == DISPLAY_PAGE_SATELLITE then
         build_satellite_page()
     elseif active_display_page == DISPLAY_PAGE_MAINTENANCE then
