@@ -5,7 +5,7 @@
 local PLUGIN_NAME = "X2030"
 local CAMPAIGN_SUBTITLE = "THE ALIGNMENT PROTOCOL"
 local CURRENT_MISSION_STATUS =
-    "LEG 1 / 10: Build sufficient fuel reserves to reach YSRI Richmond"
+    "LEG 1 / 10: Fly from NZMO to YSNF Norfolk Island"
 
 -- The full briefing is shown only for a newly created campaign. Keeping these
 -- deliberately wrapped lines avoids relying on unavailable font measurements
@@ -2173,9 +2173,14 @@ local function build_opening_briefing_page()
     mission_computer_separator()
     mission_computer_text("LEG 1 // THE DITCH")
     mission_computer_text(
-        "Build sufficient fuel reserves to reach YSRI Richmond Military Base."
+        "Fly from NZMO to YSNF Norfolk Island Airport."
     )
-    mission_computer_text("Objective: recover Alignment Key 1 of 8.")
+    mission_computer_text(
+        "Resistance ground crew at YSNF guarantee a full tank on arrival."
+    )
+    mission_computer_text(
+        "Then continue to YSRI Richmond to recover Alignment Key 1 of 8."
+    )
     mission_computer_text("")
     mission_computer_text("THREAT ADVISORY")
     mission_computer_text(
@@ -2202,7 +2207,13 @@ local function build_mission_page()
     mission_computer_separator()
     mission_computer_text(CURRENT_MISSION_STATUS)
     mission_computer_text(
-        "OBJECTIVE: Recover Alignment Key 1 of 8 at Richmond Military Base"
+        "OBJECTIVE: Land at YSNF and rendezvous with the resistance"
+    )
+    mission_computer_text(
+        "FUEL ASSURANCE: Resistance ground crew will fill the SF50's tanks"
+    )
+    mission_computer_text(
+        "NEXT: YSRI Richmond Military Base - recover Alignment Key 1 of 8"
     )
     mission_computer_text(
         is_required_campaign_aircraft_loaded()
