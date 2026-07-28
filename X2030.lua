@@ -369,41 +369,74 @@ local function set_status(message)
     )
 end
 
+local function campaign_sound_file_has_wav_header(sound_path)
+    local sound_file = io.open(sound_path, "rb")
+    if sound_file == nil then
+        return false, "file is missing or unreadable"
+    end
+
+    -- OpenAL needs a real WAV container, not merely a file carrying a .wav
+    -- suffix. Checking the container signature here gives a useful diagnostic
+    -- before FlyWithLua reduces all load failures to buffer handle 0.
+    local header = sound_file:read(12)
+    sound_file:close()
+
+    if header == nil or #header < 12
+        or string.sub(header, 1, 4) ~= "RIFF"
+        or string.sub(header, 9, 12) ~= "WAVE" then
+
+        return false, "file is not a RIFF/WAVE recording"
+    end
+
+    return true, nil
+end
+
+local function load_campaign_sound(sound_path, description, optional)
+    local valid_file, validation_error =
+        campaign_sound_file_has_wav_header(sound_path)
+
+    if not valid_file then
+        local availability = optional and "Optional recording unavailable: "
+            or "Could not load required alert: "
+        logMsg(
+            "[X2030 AUDIO] " .. availability .. sound_path
+                .. " (" .. validation_error .. ")"
+        )
+        return nil
+    end
+
+    local loaded_ok, sound_handle = pcall(load_WAV_file, sound_path)
+    local numeric_handle = tonumber(sound_handle)
+
+    -- FlyWithLua/OpenAL reports a failed buffer creation as handle 0. It is
+    -- not a playable sound even though it is non-nil and pcall succeeded.
+    if not loaded_ok or numeric_handle == nil or numeric_handle <= 0 then
+        logMsg(
+            "[X2030 AUDIO] OpenAL could not create a buffer for "
+                .. description .. ": " .. sound_path
+                .. " (confirm uncompressed PCM WAV format)"
+        )
+        return nil
+    end
+
+    return sound_handle
+end
+
 local function load_campaign_sounds()
     -- Audio is supplementary: a missing or invalid WAV must never prevent the
     -- visual satellite warning or the rest of the campaign from operating.
-    local loaded_ok, sound_handle = pcall(
-        load_WAV_file,
-        SATELLITE_COVERAGE_ALERT_PATH
+    satellite_coverage_alert_sound = load_campaign_sound(
+        SATELLITE_COVERAGE_ALERT_PATH,
+        "satellite coverage alert",
+        false
     )
-
-    if loaded_ok and sound_handle ~= nil then
-        satellite_coverage_alert_sound = sound_handle
-    else
-        logMsg(
-            "[X2030 AUDIO] Could not load satellite coverage alert: "
-            .. SATELLITE_COVERAGE_ALERT_PATH
-        )
-    end
 
     -- These two files are intentional placeholders. Fail quietly apart from a
     -- log entry until the recorded campaign messages are added later.
-    local opening_ok, opening_handle = pcall(load_WAV_file, MANAPOURI_MESSAGE_PATH)
-    if opening_ok and opening_handle ~= nil then
-        manapouri_message_sound = opening_handle
-    else
-        logMsg("[X2030 AUDIO] Optional recording not yet available: "
-            .. MANAPOURI_MESSAGE_PATH)
-    end
-
-    local finale_ok, finale_handle = pcall(
-        load_WAV_file, HALF_MOON_BAY_MESSAGE_PATH)
-    if finale_ok and finale_handle ~= nil then
-        half_moon_bay_message_sound = finale_handle
-    else
-        logMsg("[X2030 AUDIO] Optional recording not yet available: "
-            .. HALF_MOON_BAY_MESSAGE_PATH)
-    end
+    manapouri_message_sound = load_campaign_sound(
+        MANAPOURI_MESSAGE_PATH, "Manapouri bunker message", true)
+    half_moon_bay_message_sound = load_campaign_sound(
+        HALF_MOON_BAY_MESSAGE_PATH, "Half Moon Bay message", true)
 end
 
 local function play_optional_campaign_message(sound_handle, description)
@@ -1303,7 +1336,17 @@ end
 ------------------------------------------------------------
 
 local function random_satellite_delay(minimum_seconds, maximum_seconds)
-    return math.random(minimum_seconds, maximum_seconds)
+    local safe_minimum = safe_number(minimum_seconds, nil)
+    local safe_maximum = safe_number(maximum_seconds, nil)
+
+    if safe_minimum == nil or safe_maximum == nil
+        or safe_minimum < 0 or safe_maximum < safe_minimum then
+
+        logMsg("[X2030 SATELLITE] Invalid event-delay range; tracking reset.")
+        return nil
+    end
+
+    return math.random(safe_minimum, safe_maximum)
 end
 
 local function set_satellite_alert(
@@ -1315,10 +1358,34 @@ local function set_satellite_alert(
     satellite_alert_title = title
     satellite_alert_detail = detail
     satellite_alert_severity = severity or "INFORMATION"
-    satellite_alert_expires_at = duration_seconds == nil and nil
-        or satellite_event_time + duration_seconds
+
+    -- A nil duration deliberately means that an alert remains visible until
+    -- tracking state replaces or clears it. Lua's common "a and b or c"
+    -- idiom cannot represent that nil result: it falls through to c and was
+    -- the source of the duration_seconds arithmetic crash.
+    if duration_seconds == nil then
+        satellite_alert_expires_at = nil
+    else
+        local valid_duration = safe_number(duration_seconds, nil)
+        if valid_duration ~= nil and valid_duration > 0 then
+            satellite_alert_expires_at = satellite_event_time + valid_duration
+        else
+            -- Invalid timing must not dismiss the warning immediately. Treat
+            -- it as persistent and leave a diagnostic for script authors.
+            satellite_alert_expires_at = nil
+            logMsg(
+                "[X2030 SATELLITE] Invalid alert duration; alert will remain "
+                    .. "visible until its tracking state changes."
+            )
+        end
+    end
 
     logMsg("[X2030 SATELLITE] " .. title .. " | " .. detail)
+end
+
+local function satellite_deadline_reached(deadline)
+    local valid_deadline = safe_number(deadline, nil)
+    return valid_deadline ~= nil and satellite_event_time >= valid_deadline
 end
 
 local function clear_satellite_alert_if_expired()
@@ -1396,11 +1463,17 @@ local function schedule_satellite_acquisition(coverage)
     satellite_source_radius_nm = coverage.radius_nm
     satellite_acquisition_chance = coverage.acquisition_chance
     satellite_hit_chance = coverage.hit_chance
-    satellite_next_event_time = satellite_event_time
-        + random_satellite_delay(
-            SATELLITE_CHECK_MIN_SECONDS,
-            SATELLITE_CHECK_MAX_SECONDS
-        )
+    local acquisition_delay = random_satellite_delay(
+        SATELLITE_CHECK_MIN_SECONDS,
+        SATELLITE_CHECK_MAX_SECONDS
+    )
+    if acquisition_delay == nil then
+        reset_satellite_tracking(false)
+        return false
+    end
+
+    satellite_next_event_time = satellite_event_time + acquisition_delay
+    return true
 end
 
 -- Recalculate the distance to every usable surveillance source on each update
@@ -1510,7 +1583,7 @@ local function update_satellite_surveillance()
     if satellite_state == "COOLDOWN" then
         if coverage == nil then
             reset_satellite_tracking(false)
-        elseif satellite_event_time >= satellite_next_event_time then
+        elseif satellite_deadline_reached(satellite_next_event_time) then
             schedule_satellite_acquisition(coverage)
         end
         return
@@ -1543,7 +1616,7 @@ local function update_satellite_surveillance()
             satellite_source_icao = coverage.icao
             satellite_source_class = coverage.class
             return
-        elseif satellite_event_time >= satellite_next_event_time then
+        elseif satellite_deadline_reached(satellite_next_event_time) then
             if math.random() < satellite_hit_chance then
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - HIT",
@@ -1618,15 +1691,19 @@ local function update_satellite_surveillance()
     end
 
     if satellite_state == "WAITING"
-        and satellite_event_time >= satellite_next_event_time then
+        and satellite_deadline_reached(satellite_next_event_time) then
 
         if math.random() < satellite_acquisition_chance then
             satellite_state = "LOCKED"
-            satellite_next_event_time = satellite_event_time
-                + random_satellite_delay(
-                    SATELLITE_LOCK_MIN_SECONDS,
-                    SATELLITE_LOCK_MAX_SECONDS
-                )
+            local strike_delay = random_satellite_delay(
+                SATELLITE_LOCK_MIN_SECONDS,
+                SATELLITE_LOCK_MAX_SECONDS
+            )
+            if strike_delay == nil then
+                reset_satellite_tracking(false)
+                return
+            end
+            satellite_next_event_time = satellite_event_time + strike_delay
             set_satellite_alert(
                 "SATELLITE TRACKING DETECTED",
                 "Descend below 1,000 ft AGL or leave coverage.",
@@ -1634,11 +1711,15 @@ local function update_satellite_surveillance()
                 "DANGER"
             )
         else
-            satellite_next_event_time = satellite_event_time
-                + random_satellite_delay(
-                    SATELLITE_CHECK_MIN_SECONDS,
-                    SATELLITE_CHECK_MAX_SECONDS
-                )
+            local retry_delay = random_satellite_delay(
+                SATELLITE_CHECK_MIN_SECONDS,
+                SATELLITE_CHECK_MAX_SECONDS
+            )
+            if retry_delay == nil then
+                reset_satellite_tracking(false)
+                return
+            end
+            satellite_next_event_time = satellite_event_time + retry_delay
         end
     end
 end
