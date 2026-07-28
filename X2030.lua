@@ -152,6 +152,13 @@ local FUEL_SAVE_INTERVAL_SECONDS = 30
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
+-- Suggestions require a measurable conventional runway, not merely an airport
+-- nav-aid entry. This modest floor keeps helipads and malformed runway records
+-- out without treating every very short airfield as SF50-suitable.
+local MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES = 300
+-- Duplicate airport identifiers can exist in third-party scenery. A nav-aid
+-- must therefore also be close to the runway recorded for that identifier.
+local MAX_NAV_AID_TO_RUNWAY_DISTANCE_KM = 5.0
 
 -- Satellite surveillance uses the nearest airport's longest runway as a
 -- deliberately simple proxy for population density. All values are grouped
@@ -1317,6 +1324,55 @@ local function is_valid_destination_airport(icao)
     return valid_land_airports[icao] ~= nil
 end
 
+local function is_valid_suggested_airport(icao, latitude, longitude)
+    if not is_valid_destination_airport(icao) then
+        return false
+    end
+
+    local airport_data = valid_land_airports[icao]
+    if airport_data == nil then
+        return false
+    end
+
+    local runway_length = safe_number(
+        airport_data.longest_runway_metres, nil)
+    if runway_length == nil
+        or runway_length < MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES then
+
+        return false
+    end
+
+    -- When coordinates are supplied by the nav database, make sure this is
+    -- the same facility as the conventional runway found in apt.dat. This
+    -- prevents a heliport sharing an identifier with an airfield from being
+    -- offered at the heliport's position. Missing coordinates fail safely.
+    local nav_latitude = safe_number(latitude, nil)
+    local nav_longitude = safe_number(longitude, nil)
+    local runway_latitude = safe_number(airport_data.latitude, nil)
+    local runway_longitude = safe_number(airport_data.longitude, nil)
+
+    if nav_latitude == nil or nav_longitude == nil
+        or runway_latitude == nil or runway_longitude == nil then
+
+        return false
+    end
+
+    local nav_aid_distance_km = calculate_distance_km(
+        nav_latitude,
+        nav_longitude,
+        runway_latitude,
+        runway_longitude
+    )
+
+    if not is_number(nav_aid_distance_km)
+        or nav_aid_distance_km > MAX_NAV_AID_TO_RUNWAY_DISTANCE_KM then
+
+        return false
+    end
+
+    return true
+end
+
 local function get_longest_runway_metres(icao)
     local airport_data = valid_land_airports[icao]
 
@@ -1784,8 +1840,10 @@ local function refresh_airport_suggestions()
             and airport_icao ~= nil
             and airport_icao ~= ""
             and airport_icao ~= departure_airport
-            and is_valid_destination_airport(
-                airport_icao
+            and is_valid_suggested_airport(
+                airport_icao,
+                airport_latitude,
+                airport_longitude
         ) then
 
             local distance_km =
