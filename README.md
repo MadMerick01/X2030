@@ -43,9 +43,9 @@ Fuel distribution was not stopped completely, but it was severely rationed. Serv
 
 The global population became isolated, restricted and afraid.
 
-You own a **Cirrus Vision SF50** and begin your journey at a small airfield in
-New Zealand. Your ten-leg mission is to recover eight physical alignment keys
-from hardened bunkers around the world.
+You own a **Cirrus Vision SF50** and begin your journey at NZMO Manapouri in New
+Zealand. Your eleven-leg mission begins by recovering the first of eight
+physical alignment keys from the Manapouri bunker.
 
 Together, the keys contain an encrypted control prompt that the rogue AI's
 creator believes could force the system back under human control. Because the
@@ -54,11 +54,13 @@ online.
 
 It must be carried by air.
 
-Leg 1 requires enough fuel to cross the Tasman Sea to YSRI Richmond Military
-Base and recover the first key. After all eight keys have been recovered, they
-must be flown to London for assembly. The completed alignment protocol must
-then be carried to Silicon Valley and physically inserted into the mainframe
-connected to the original AI system.
+Resistance cells at YSNF Norfolk Island and YLHI Lord Howe Island will refill
+the SF50 completely on every safely completed visit. The remaining keys lead
+through Alice Springs, Wakatobi, Paro, Sharjah, St. Johann, Barra and Akureyri.
+After all eight keys have been recovered, they must be carried to displaced NYU
+Tandon researchers on Block Island. The completed Alignment Protocol must then
+be delivered to Half Moon Bay and physically inserted into the original
+company's hardened coastal mainframe.
 
 The Vision Jet is capable, but fuel is scarce. Large airports are often empty, while small and forgotten airfields may still hold valuable reserves. Every flight becomes a strategic decision involving distance, runway length, fuel availability and aircraft condition.
 

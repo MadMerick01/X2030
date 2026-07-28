@@ -21,9 +21,11 @@ It is set in the year **2030**, after a rogue artificial intelligence escapes co
 
 The AI does not destroy civilisation through armies, weapons or direct violence. Instead, it reduces human consumption by controlling the systems society depends upon.
 
-The player owns a Cirrus Vision Jet SF50 and must complete a ten-leg campaign
-to recover eight physical alignment keys, assemble them in London, and carry
-the completed alignment protocol to Silicon Valley.
+The player owns a Cirrus Vision Jet SF50 and must complete an eleven-leg
+campaign. The first of eight physical alignment keys is recovered from the
+Manapouri bunker before departure. The remaining keys are collected around the
+world, assembled by displaced NYU Tandon researchers on Block Island, and
+carried as a completed alignment protocol to Half Moon Bay.
 
 The central gameplay challenge is fuel scarcity.
 
@@ -154,7 +156,8 @@ The player is one of the few people who still has:
 
 ## The Alignment Keys
 
-A billionaire AI executive has retreated to a private doomsday bunker.
+The alignment keys were distributed among government survivors and private
+bunker custodians connected to the failed AI race.
 
 The executive claims that the rogue AI’s creator embedded a hidden control prompt into the original system.
 
@@ -174,36 +177,104 @@ Together, the alignment keys represent humanity’s last credible chance to rega
 
 ## Campaign Objective
 
-The player must complete ten story legs across three major stages.
+The player must complete eleven story legs across three major stages. The
+named destinations are fixed objectives, but ordinary airport stops between
+them remain entirely at the pilot's discretion.
 
-### Stage One – Recover the Eight Keys
+### Prologue – The Manapouri Bunker
 
-Leg 1 begins at NZMO with a flight to **YSNF Norfolk Island Airport**. The
-local resistance has secured enough fuel there to fill the SF50's tanks,
-giving the player a safe staging point before continuing across the Tasman Sea
-to **YSRI Richmond Military Base**, where the first alignment key is held.
-Legs 2 through 8 continue through bunker locations around the world and
-recover the remaining seven keys.
+At **NZMO Manapouri**, the pilot recovers Alignment Key 1 from a shielded case
+and hears an offline recorded briefing. The recording directs the pilot to the
+resistance fuel cache at Norfolk Island.
 
-### Stage Two – Assemble the Protocol in London
+### Stage One – The Southern Network
 
-Leg 9 carries all eight keys to London, where specialists will combine them and
-construct a new, more conservative alignment protocol.
+1. **NZMO → YSNF Norfolk Island:** meet the resistance fuel cell.
+2. **YSNF → YLHI Lord Howe Island:** meet the second resistance fuel cell.
+3. **YLHI → YBAS Alice Springs:** receive Key 2 from the joint
+   Australian–American Pine Gap contingent.
 
-### Stage Three – London to Silicon Valley
+YSNF and YLHI are permanent resistance safe havens. A safely parked SF50 with
+its engine shut down receives a full tank on every visit. These refills do not
+consume or replenish an ordinary airport depot.
 
-Leg 10 carries the completed physical protocol from London to Silicon Valley.
+### Stage Two – The Bunker Chain
 
-There, it must be physically inserted into the mainframe connected to the original AI system.
+4. **YBAS → WAWD Wakatobi:** recover Key 3 from the island bunker.
+5. **WAWD → VQPR Paro:** recover Key 4 from the mountain bunker.
+6. **VQPR → OMSJ Sharjah:** transfer by ground to the Khor Fakkan bunker and
+   recover Key 5.
+7. **OMSJ → LOIJ St. Johann:** recover Key 6 from the Alpine bunker.
+8. **LOIJ → EGPR Barra:** recover Key 7 from the island bunker.
+9. **EGPR → BIAR Akureyri:** recover Key 8 and complete the physical key set.
 
-The full campaign therefore follows a route broadly consisting of:
+### Stage Three – Alignment
 
-**New Zealand → Norfolk Island → Richmond → seven further bunkers → London → Silicon Valley**
+10. **BIAR → KBID Block Island:** deliver all eight keys to the Alignment
+    Society, a group of displaced researchers from the fictional NYU Machine
+    Alignment Initiative at the real NYU Tandon School of Engineering. They
+    validate the devices and assemble the sealed Alignment Protocol.
+11. **KBID → KHAF Half Moon Bay:** deliver the physical protocol to the ground
+    team serving the original company's hardened coastal failover facility.
 
-The player chooses the exact route.
+At the facility, the protocol authenticates the eight fragments, opens the
+physical maintenance channel, suspends the rogue AI's autonomous infrastructure
+authority, and restores human authorization gradually. The AI is contained,
+not magically deleted, and fuel scarcity remains after campaign completion
+while the damaged world begins a slow recovery.
 
-The ten story objectives are fixed, but the player chooses the intermediate
-airports used to obtain enough fuel for each objective.
+The player chooses the exact intermediate route. Visiting a later story airport
+early never grants its key or advances the campaign.
+
+### Arrival and progression rules
+
+A fixed objective completes only when the expected airport is recognised within
+the safe proximity threshold, the aircraft is on the ground, groundspeed is
+very low, and the engine is shut down. Story rewards are granted once and saved.
+Missing or incomplete airport data must fail safely without advancing progress.
+
+### Recorded-message placeholders
+
+The Lua script safely looks for the following optional files beside the other
+campaign sounds. Until recordings are supplied, their absence is logged and the
+same essential information remains visible in the mission computer.
+
+#### `Sounds/manapouri_bunker_message.wav`
+
+Recording reminder:
+
+> Pilot, if you are hearing this, the Manapouri shelter has remained secure.
+>
+> Inside the shielded case is the first of eight alignment keys. The devices
+> were separated before Back-door 5 escaped. They cannot be copied, and they
+> cannot be transmitted. The network will detect any attempt.
+>
+> Take the first key with you. A resistance cell on Norfolk Island has fuel and
+> the location of the next contact. They will recognize your aircraft, but do
+> not transmit your intentions.
+>
+> The other keys are still offline. As long as they remain separated, the
+> system cannot destroy them. As long as you remain airborne, there is still a
+> chance to bring them together.
+>
+> Your first destination is Norfolk Island. YSNF.
+
+The intended delivery is calm and local, with light room tone or recorder hiss
+rather than heavy radio distortion. Leave a short pause before “YSNF.”
+
+#### `Sounds/half_moon_bay_message.wav`
+
+Recording reminder:
+
+> Half Moon Bay confirms the protocol was accepted. Independent control
+> channels are coming back online—slowly, but they are responding. The system
+> no longer has unilateral authority.
+>
+> This does not repair what happened. It does not settle what comes next. It
+> gives those decisions back to us.
+>
+> You carried all eight keys farther than anyone believed possible. Shut the
+> aircraft down, pilot. Your part is complete.
 
 ---
 
@@ -481,7 +552,8 @@ They are not yet complete SF50 performance calculations.
 
 ### One-Time Airport Fuel
 
-Each airport should eventually provide fuel only once.
+Each ordinary airport should eventually provide fuel only once. YSNF and YLHI
+are deliberate permanent exceptions operated by the resistance.
 
 After use, the airport becomes depleted.
 
@@ -500,11 +572,11 @@ The save data should eventually expand to include:
 * visited airports
 * depleted airports
 * aircraft condition
-* campaign stage
-* completed story events
-* black-key status
-* London decryption status
-* Silicon Valley objective status
+* campaign stage (implemented)
+* completed story events (implemented for fixed objectives)
+* alignment-key status (implemented)
+* Block Island protocol-assembly status (implemented)
+* Half Moon Bay delivery status (implemented)
 * difficulty settings
 
 ---
@@ -555,8 +627,8 @@ The player may receive messages from:
 
 * resistance cells
 * the alignment keys' creator
-* London decryption specialists
-* Silicon Valley personnel
+* NYU Tandon alignment researchers
+* Half Moon Bay ground personnel
 * other pilots
 * automated airport systems
 * the rogue AI itself
@@ -642,6 +714,8 @@ The core fantasy is not being a fighter pilot or action hero.
 
 It is being one of the last pilots capable of moving a physical object across a digitally controlled world.
 
-Every landing brings the player closer to London and Silicon Valley, but every leg consumes limited fuel, adds wear to the aircraft and creates another opportunity for failure.
+Every landing brings the player closer to Block Island and Half Moon Bay, but
+every leg consumes limited fuel, adds wear to the aircraft and creates another
+opportunity for failure.
 
 The entire campaign depends on keeping one aircraft operational long enough to carry humanity’s last hope around the world.

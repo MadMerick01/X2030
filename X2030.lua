@@ -1,11 +1,100 @@
 -- X2030
--- Prototype 0.7
+-- Prototype 0.8
 -- Airport fuel, next-hop suggestions and satellite surveillance
 
 local PLUGIN_NAME = "X2030"
 local CAMPAIGN_SUBTITLE = "THE ALIGNMENT PROTOCOL"
-local CURRENT_MISSION_STATUS =
-    "LEG 1 / 10: Fly from NZMO to YSNF Norfolk Island"
+local TOTAL_CAMPAIGN_LEGS = 11
+local TOTAL_ALIGNMENT_KEYS = 8
+
+-- Fixed story objectives are deliberately separate from ordinary fuel hops.
+-- The pilot may use any intermediate airport, but only the active objective
+-- advances the campaign. All story text is data-driven so a missing entry can
+-- fall back safely instead of breaking an update or draw callback.
+local CAMPAIGN_LEGS = {
+    {
+        destination_icao = "YSNF",
+        destination_name = "Norfolk Island",
+        objective = "Rendezvous with the resistance fuel cell",
+        arrival = "Norfolk resistance contact established. Full fuel available."
+    },
+    {
+        destination_icao = "YLHI",
+        destination_name = "Lord Howe Island",
+        objective = "Rendezvous with the second resistance fuel cell",
+        arrival = "Lord Howe resistance contact established. Full fuel available."
+    },
+    {
+        destination_icao = "YBAS",
+        destination_name = "Alice Springs",
+        objective = "Receive Alignment Key 2 from the Pine Gap contingent",
+        arrival = "Pine Gap transfer complete. Alignment Key 2 recovered.",
+        key_number = 2
+    },
+    {
+        destination_icao = "WAWD",
+        destination_name = "Wakatobi",
+        objective = "Recover Alignment Key 3 from the island bunker",
+        arrival = "Wakatobi bunker secured. Alignment Key 3 recovered.",
+        key_number = 3
+    },
+    {
+        destination_icao = "VQPR",
+        destination_name = "Paro",
+        objective = "Recover Alignment Key 4 from the mountain bunker",
+        arrival = "Paro bunker secured. Alignment Key 4 recovered.",
+        key_number = 4
+    },
+    {
+        destination_icao = "OMSJ",
+        destination_name = "Sharjah / Khor Fakkan",
+        objective = "Meet the ground team for the Khor Fakkan bunker",
+        arrival = "Khor Fakkan transfer complete. Alignment Key 5 recovered.",
+        key_number = 5
+    },
+    {
+        destination_icao = "LOIJ",
+        destination_name = "St. Johann",
+        objective = "Recover Alignment Key 6 from the Alpine bunker",
+        arrival = "Alpine bunker secured. Alignment Key 6 recovered.",
+        key_number = 6
+    },
+    {
+        destination_icao = "EGPR",
+        destination_name = "Barra",
+        objective = "Recover Alignment Key 7 from the island bunker",
+        arrival = "Barra transfer complete. Alignment Key 7 recovered.",
+        key_number = 7
+    },
+    {
+        destination_icao = "BIAR",
+        destination_name = "Akureyri",
+        objective = "Recover the final alignment key",
+        arrival = "Key set complete. Alignment Key 8 recovered.",
+        key_number = 8
+    },
+    {
+        destination_icao = "KBID",
+        destination_name = "Block Island",
+        objective = "Deliver all eight keys to the Alignment Society",
+        arrival = "NYU Tandon researchers assembled the Alignment Protocol.",
+        assembles_protocol = true
+    },
+    {
+        destination_icao = "KHAF",
+        destination_name = "Half Moon Bay",
+        objective = "Deliver the sealed Alignment Protocol to the mainframe team",
+        arrival = "Protocol accepted. Human authorization channels are responding.",
+        completes_campaign = true
+    }
+}
+
+-- Resistance safe havens are intentionally exceptional: after every qualified
+-- arrival they fill the SF50 completely without consuming a normal depot.
+local RESISTANCE_FULL_FUEL_AIRPORTS = {
+    YSNF = true,
+    YLHI = true
+}
 
 -- The full briefing is shown only for a newly created campaign. Keeping these
 -- deliberately wrapped lines avoids relying on unavailable font measurements
@@ -20,8 +109,8 @@ local OPENING_BRIEFING_LINES = {
     "ceased. The global population is isolated and afraid.",
     "",
     "Eight physical alignment keys are held in hardened bunkers around the world.",
-    "Once assembled by specialists in London, they must be carried to the Silicon",
-    "Valley mainframe, where the AI may accept a new, conservative alignment.",
+    "Once recovered, NYU Tandon specialists on Block Island must assemble them",
+    "into a conservative protocol for physical delivery at Half Moon Bay.",
     "",
     "Humanity's last credible hope rests with you."
 }
@@ -32,7 +121,7 @@ local CAMPAIGN_START_AIRPORT_ICAO = "NZMO"
 local CAMPAIGN_START_AIRPORT_NAME = "Manapouri / Te Anau"
 local REQUIRED_AIRCRAFT_ICAO = "SF50"
 local REQUIRED_AIRCRAFT_NAME = "Cirrus Vision SF50"
-local CAMPAIGN_SAVE_VERSION = 2
+local CAMPAIGN_SAVE_VERSION = 3
 local CAMPAIGN_PREFERENCES_DIRECTORY =
     SYSTEM_DIRECTORY
     .. "Output"
@@ -96,6 +185,15 @@ local SATELLITE_COVERAGE_ALERT_PATH =
     .. "Sounds"
     .. DIRECTORY_SEPARATOR
     .. "Satallite_coverage_alert.wav"
+
+-- Recording placeholders. The campaign continues with on-screen text until the
+-- pilot supplies these WAV files; project_brief.md preserves the recording copy.
+local MANAPOURI_MESSAGE_PATH =
+    SCRIPT_DIRECTORY .. "Sounds" .. DIRECTORY_SEPARATOR
+    .. "manapouri_bunker_message.wav"
+local HALF_MOON_BAY_MESSAGE_PATH =
+    SCRIPT_DIRECTORY .. "Sounds" .. DIRECTORY_SEPARATOR
+    .. "half_moon_bay_message.wav"
 
 -- Approximate flight-planning assumptions
 local ESTIMATED_AVERAGE_SPEED_KT = 180
@@ -204,6 +302,11 @@ local profile_screen_active = true
 local overwrite_confirmation_active = false
 local pilot_name = nil
 local campaign_starting_fuel_kg = INITIAL_CAMPAIGN_FUEL_KG
+local campaign_leg = 1
+local alignment_keys_recovered = 1
+local alignment_protocol_assembled = false
+local campaign_completed = false
+local latest_story_event = "Alignment Key 1 recovered from the Manapouri bunker."
 local profile_name_input = ""
 local profile_fuel_input = INITIAL_CAMPAIGN_FUEL_KG
 local profile_status_message = "Select or create a pilot profile."
@@ -248,6 +351,8 @@ local satellite_alert_expires_at = nil
 local satellite_alert_severity = nil
 local satellite_proximity = nil
 local satellite_coverage_alert_sound = nil
+local manapouri_message_sound = nil
+local half_moon_bay_message_sound = nil
 
 ------------------------------------------------------------
 -- GENERAL UTILITY FUNCTIONS
@@ -271,13 +376,45 @@ local function load_campaign_sounds()
 
     if loaded_ok and sound_handle ~= nil then
         satellite_coverage_alert_sound = sound_handle
-        return
+    else
+        logMsg(
+            "[X2030 AUDIO] Could not load satellite coverage alert: "
+            .. SATELLITE_COVERAGE_ALERT_PATH
+        )
     end
 
-    logMsg(
-        "[X2030 AUDIO] Could not load satellite coverage alert: "
-        .. SATELLITE_COVERAGE_ALERT_PATH
-    )
+    -- These two files are intentional placeholders. Fail quietly apart from a
+    -- log entry until the recorded campaign messages are added later.
+    local opening_ok, opening_handle = pcall(load_WAV_file, MANAPOURI_MESSAGE_PATH)
+    if opening_ok and opening_handle ~= nil then
+        manapouri_message_sound = opening_handle
+    else
+        logMsg("[X2030 AUDIO] Optional recording not yet available: "
+            .. MANAPOURI_MESSAGE_PATH)
+    end
+
+    local finale_ok, finale_handle = pcall(
+        load_WAV_file, HALF_MOON_BAY_MESSAGE_PATH)
+    if finale_ok and finale_handle ~= nil then
+        half_moon_bay_message_sound = finale_handle
+    else
+        logMsg("[X2030 AUDIO] Optional recording not yet available: "
+            .. HALF_MOON_BAY_MESSAGE_PATH)
+    end
+end
+
+local function play_optional_campaign_message(sound_handle, description)
+    if sound_handle == nil then
+        return false
+    end
+
+    local played_ok = pcall(play_sound, sound_handle)
+    if not played_ok then
+        logMsg("[X2030 AUDIO] Could not play " .. tostring(description) .. ".")
+        return false
+    end
+
+    return true
 end
 
 local function play_satellite_coverage_alert()
@@ -578,7 +715,8 @@ local function load_campaign_save()
     save_file:close()
 
     local save_version = tonumber(saved_values.version)
-    if (save_version ~= 1 and save_version ~= CAMPAIGN_SAVE_VERSION)
+    if (save_version ~= 1 and save_version ~= 2
+            and save_version ~= CAMPAIGN_SAVE_VERSION)
         or saved_values.campaign_started ~= "1"
         or not is_valid_airport_identifier(
             saved_values.current_airport
@@ -587,7 +725,7 @@ local function load_campaign_save()
         return nil, "invalid", loaded_save_path
     end
 
-    if save_version == CAMPAIGN_SAVE_VERSION then
+    if save_version == 2 or save_version == CAMPAIGN_SAVE_VERSION then
         local saved_name = saved_values.pilot_name or ""
         local saved_starting_fuel = tonumber(saved_values.starting_fuel_kg)
         if #saved_name < 2 or #saved_name > 32
@@ -596,6 +734,32 @@ local function load_campaign_save()
             or saved_starting_fuel ~= math.floor(saved_starting_fuel)
             or saved_starting_fuel < MINIMUM_STARTING_FUEL_KG
             or saved_starting_fuel > MAXIMUM_STARTING_FUEL_KG then
+            return nil, "invalid", loaded_save_path
+        end
+    end
+
+    local saved_campaign_leg = 1
+    local saved_keys_recovered = 1
+    local saved_protocol_assembled = false
+    local saved_campaign_completed = false
+
+    if save_version == CAMPAIGN_SAVE_VERSION then
+        saved_campaign_leg = tonumber(saved_values.campaign_leg)
+        saved_keys_recovered = tonumber(saved_values.keys_recovered)
+        saved_protocol_assembled = saved_values.protocol_assembled == "1"
+        saved_campaign_completed = saved_values.campaign_completed == "1"
+
+        if saved_campaign_leg == nil
+            or saved_campaign_leg ~= math.floor(saved_campaign_leg)
+            or saved_campaign_leg < 1
+            or saved_campaign_leg > TOTAL_CAMPAIGN_LEGS
+            or saved_keys_recovered == nil
+            or saved_keys_recovered ~= math.floor(saved_keys_recovered)
+            or saved_keys_recovered < 1
+            or saved_keys_recovered > TOTAL_ALIGNMENT_KEYS
+            or (saved_protocol_assembled and saved_keys_recovered < 8)
+            or (saved_campaign_completed and not saved_protocol_assembled) then
+
             return nil, "invalid", loaded_save_path
         end
     end
@@ -624,6 +788,10 @@ local function load_campaign_save()
         starting_fuel_kg = tonumber(saved_values.starting_fuel_kg)
             or INITIAL_CAMPAIGN_FUEL_KG,
         current_airport = saved_values.current_airport,
+        campaign_leg = saved_campaign_leg,
+        keys_recovered = saved_keys_recovered,
+        protocol_assembled = saved_protocol_assembled,
+        campaign_completed = saved_campaign_completed,
         fuel_tanks = saved_fuel_tanks
     }, nil, loaded_save_path
 end
@@ -655,7 +823,12 @@ local function save_campaign_progress()
         "pilot_name=", tostring(pilot_name or "UNKNOWN PILOT"), "\n",
         "starting_fuel_kg=",
             tostring(campaign_starting_fuel_kg), "\n",
-        "current_airport=", departure_airport, "\n"
+        "current_airport=", departure_airport, "\n",
+        "campaign_leg=", tostring(campaign_leg), "\n",
+        "keys_recovered=", tostring(alignment_keys_recovered), "\n",
+        "protocol_assembled=",
+            alignment_protocol_assembled and "1\n" or "0\n",
+        "campaign_completed=", campaign_completed and "1\n" or "0\n"
     )
 
     for tank = 0, 8 do
@@ -1682,6 +1855,100 @@ local function transfer_airport_fuel_to_aircraft(airport_icao)
     }
 end
 
+-- Resistance fuel is an unlimited strategic service rather than an airport
+-- depot. It may be used on every return to Norfolk or Lord Howe, but only after
+-- the same stopped-and-shut-down arrival checks used by ordinary refuelling.
+local function fill_aircraft_from_resistance(airport_icao)
+    if not RESISTANCE_FULL_FUEL_AIRPORTS[airport_icao] then
+        return nil
+    end
+
+    local remaining_capacity, capacity_kg =
+        get_aircraft_remaining_fuel_capacity_kg()
+    if remaining_capacity == nil or capacity_kg == nil then
+        return nil
+    end
+
+    if remaining_capacity > 0 and not add_balanced_fuel(remaining_capacity) then
+        return nil
+    end
+
+    logMsg(string.format(
+        "[X2030 FUEL] Resistance at %s filled aircraft to %.0f kg",
+        airport_icao, capacity_kg))
+
+    return {
+        icao = airport_icao,
+        depot_before_kg = remaining_capacity,
+        transferred_kg = remaining_capacity,
+        depot_remaining_kg = capacity_kg,
+        aircraft_total_kg = get_total_fuel(),
+        aircraft_full = true,
+        resistance_service = true
+    }
+end
+
+local function get_active_campaign_leg()
+    if campaign_completed then
+        return CAMPAIGN_LEGS[TOTAL_CAMPAIGN_LEGS]
+    end
+
+    local safe_leg = safe_number(campaign_leg, nil)
+    if safe_leg == nil or safe_leg ~= math.floor(safe_leg)
+        or safe_leg < 1 or safe_leg > TOTAL_CAMPAIGN_LEGS then
+        return nil
+    end
+
+    return CAMPAIGN_LEGS[safe_leg]
+end
+
+-- Advance only when the active fixed objective is reached in sequence. Landing
+-- at a future story airport early remains a normal fuel stop and grants no key.
+local function process_story_arrival(arrival_icao)
+    if campaign_completed or not is_valid_airport_identifier(arrival_icao) then
+        return nil
+    end
+
+    local active_leg = get_active_campaign_leg()
+    if active_leg == nil or arrival_icao ~= active_leg.destination_icao then
+        return nil
+    end
+
+    if active_leg.key_number ~= nil then
+        alignment_keys_recovered = math.max(
+            alignment_keys_recovered,
+            clamp(active_leg.key_number, 1, TOTAL_ALIGNMENT_KEYS))
+    end
+
+    if active_leg.assembles_protocol then
+        -- A corrupt or manually edited save must never assemble an incomplete
+        -- protocol simply because the aircraft arrived at Block Island.
+        if alignment_keys_recovered < TOTAL_ALIGNMENT_KEYS then
+            latest_story_event =
+                "Protocol assembly refused: the complete key set is required."
+            return latest_story_event
+        end
+        alignment_protocol_assembled = true
+    end
+
+    if active_leg.completes_campaign then
+        if not alignment_protocol_assembled then
+            latest_story_event =
+                "Final transfer refused: the Alignment Protocol is not assembled."
+            return latest_story_event
+        end
+        campaign_completed = true
+        play_optional_campaign_message(
+            half_moon_bay_message_sound, "Half Moon Bay message")
+    else
+        campaign_leg = math.min(TOTAL_CAMPAIGN_LEGS, campaign_leg + 1)
+    end
+
+    latest_story_event = active_leg.arrival or
+        ("Objective completed at " .. arrival_icao .. ".")
+    return latest_story_event
+end
+
 -- A new campaign begins with an exact, deliberately scarce fuel load. Clear
 -- every simulator tank first so fuel configured in X-Plane cannot carry into
 -- the campaign, then balance the starting load across the SF50's two tanks.
@@ -1800,6 +2067,12 @@ local function create_new_profile()
     campaign_starting_fuel_kg = new_profile.starting_fuel_kg
     departure_airport = CAMPAIGN_START_AIRPORT_ICAO
     campaign_started = true
+    campaign_leg = 1
+    alignment_keys_recovered = 1
+    alignment_protocol_assembled = false
+    campaign_completed = false
+    latest_story_event =
+        "Alignment Key 1 recovered from the Manapouri bunker."
     show_campaign_opening_briefing = true
     set_initial_campaign_fuel(campaign_starting_fuel_kg)
     get_or_create_airport_fuel(
@@ -1818,6 +2091,8 @@ local function create_new_profile()
     overwrite_confirmation_active = false
     refresh_airport_suggestions()
     set_status("Starting airport: NZMO. Select your next hop.")
+    play_optional_campaign_message(
+        manapouri_message_sound, "Manapouri bunker message")
     return true
 end
 
@@ -1869,6 +2144,14 @@ local function load_existing_profile()
     departure_airport = available_saved_campaign.current_airport
     pilot_name = available_saved_campaign.pilot_name
     campaign_starting_fuel_kg = available_saved_campaign.starting_fuel_kg
+    campaign_leg = available_saved_campaign.campaign_leg or 1
+    alignment_keys_recovered = available_saved_campaign.keys_recovered or 1
+    alignment_protocol_assembled =
+        available_saved_campaign.protocol_assembled == true
+    campaign_completed = available_saved_campaign.campaign_completed == true
+    latest_story_event = campaign_completed
+        and "Mission complete. Human authorization channels are responding."
+        or "Campaign progress restored."
     campaign_started = true
     show_campaign_opening_briefing = false
     restore_saved_fuel(available_saved_campaign.fuel_tanks)
@@ -1986,56 +2269,75 @@ function xoof_update()
         return
     end
 
-    if nearest_airport
-        ==
-        departure_airport then
+    local arrival_airport = nearest_airport
+    local returned_to_departure = arrival_airport == departure_airport
+    local transfer_result
 
-        touch_airport_fuel_record(nearest_airport)
-
-        local return_was_saved = save_campaign_progress()
-
-        if return_was_saved then
-            set_status(
-                "Returned to "
-                .. nearest_airport
-                .. ". This airport has no new fuel."
-            )
-        else
-            set_status(
-                "Returned to "
-                .. nearest_airport
-                .. ". Campaign save failed."
-            )
-        end
-
-        has_been_airborne = false
-
-        refresh_airport_suggestions()
-
-        return
+    if RESISTANCE_FULL_FUEL_AIRPORTS[arrival_airport] then
+        transfer_result = fill_aircraft_from_resistance(arrival_airport)
+    elseif returned_to_departure then
+        -- Ordinary depots issue fuel once on first arrival. A local circuit must
+        -- not reset or replenish their finite stock.
+        touch_airport_fuel_record(arrival_airport)
+        transfer_result = {
+            icao = arrival_airport,
+            depot_before_kg = 0,
+            transferred_kg = 0,
+            depot_remaining_kg = 0,
+            aircraft_total_kg = get_total_fuel(),
+            aircraft_full = false,
+            return_without_service = true
+        }
+    else
+        transfer_result = transfer_airport_fuel_to_aircraft(arrival_airport)
     end
 
-    local transfer_result =
-        transfer_airport_fuel_to_aircraft(nearest_airport)
-
     if transfer_result == nil then
-        set_status(
-            "Airport depot or aircraft capacity unavailable. No fuel delivered."
-        )
+        local active_leg = get_active_campaign_leg()
+        if active_leg == nil
+            or active_leg.destination_icao ~= arrival_airport then
+            set_status(
+                "Airport depot or aircraft capacity unavailable. No fuel delivered."
+            )
+            return
+        end
 
-        return
+        -- Story qualification depends on a verified safe arrival, not on depot
+        -- metadata. Preserve progression if fuel capacity or depot data happens
+        -- to be unavailable, while explicitly reporting that no fuel moved.
+        transfer_result = {
+            icao = arrival_airport,
+            depot_before_kg = 0,
+            transferred_kg = 0,
+            depot_remaining_kg = 0,
+            aircraft_total_kg = get_total_fuel(),
+            aircraft_full = false,
+            fuel_data_unavailable = true
+        }
     end
 
     last_fuel_transfer = transfer_result
 
-    local arrival_airport =
-        nearest_airport
-
-    departure_airport =
-        arrival_airport
+    departure_airport = arrival_airport
+    local story_event = process_story_arrival(arrival_airport)
 
     if save_campaign_progress() then
-        if transfer_result.depot_before_kg <= 0 then
+        if story_event ~= nil then
+            if transfer_result.fuel_data_unavailable then
+                set_status(story_event .. " Fuel service unavailable; progress saved.")
+            elseif transfer_result.resistance_service then
+                set_status(story_event .. " Resistance tanks filled the SF50.")
+            else
+                set_status(story_event .. " Progress saved.")
+            end
+        elseif transfer_result.resistance_service then
+            set_status(string.format(
+                "Resistance service at %s. SF50 filled to %.0f kg.",
+                arrival_airport, transfer_result.aircraft_total_kg))
+        elseif transfer_result.return_without_service then
+            set_status("Returned to " .. arrival_airport
+                .. ". This airport has no new fuel.")
+        elseif transfer_result.depot_before_kg <= 0 then
             set_status("Arrived " .. arrival_airport
                 .. ". DEPOT DEPLETED. NO TRANSFER AVAILABLE.")
         elseif transfer_result.transferred_kg <= 0 then
@@ -2171,15 +2473,19 @@ local function build_opening_briefing_page()
     end
 
     mission_computer_separator()
-    mission_computer_text("LEG 1 // THE DITCH")
+    mission_computer_text("PROLOGUE // THE MANAPOURI BUNKER")
+    mission_computer_text("Alignment Key 1 recovered from the shielded case.")
+    mission_computer_text("Recorded-message placeholder: manapouri_bunker_message.wav")
+    mission_computer_text("")
+    mission_computer_text("LEG 1 / 11 // THE DITCH")
     mission_computer_text(
         "Fly from NZMO to YSNF Norfolk Island Airport."
     )
     mission_computer_text(
-        "Resistance ground crew at YSNF guarantee a full tank on arrival."
+        "Resistance ground crew at YSNF guarantee full fuel on every visit."
     )
     mission_computer_text(
-        "Then continue to YSRI Richmond to recover Alignment Key 1 of 8."
+        "The second resistance fuel cell is waiting at YLHI Lord Howe Island."
     )
     mission_computer_text("")
     mission_computer_text("THREAT ADVISORY")
@@ -2205,16 +2511,31 @@ local function build_mission_page()
 
     mission_computer_text("MISSION STATUS")
     mission_computer_separator()
-    mission_computer_text(CURRENT_MISSION_STATUS)
-    mission_computer_text(
-        "OBJECTIVE: Land at YSNF and rendezvous with the resistance"
-    )
-    mission_computer_text(
-        "FUEL ASSURANCE: Resistance ground crew will fill the SF50's tanks"
-    )
-    mission_computer_text(
-        "NEXT: YSRI Richmond Military Base - recover Alignment Key 1 of 8"
-    )
+    if campaign_completed then
+        mission_computer_text("THE ALIGNMENT PROTOCOL // COMPLETE")
+        mission_computer_text("FINAL LOCATION: KHAF Half Moon Bay")
+        mission_computer_text("Autonomous infrastructure authority suspended.")
+        mission_computer_text("Human authorization channels are responding.")
+    else
+        local active_leg = get_active_campaign_leg()
+        if active_leg ~= nil then
+            mission_computer_text(string.format(
+                "LEG %d / %d: %s - %s",
+                campaign_leg, TOTAL_CAMPAIGN_LEGS,
+                active_leg.destination_icao, active_leg.destination_name))
+            mission_computer_text("OBJECTIVE: " .. active_leg.objective)
+            if RESISTANCE_FULL_FUEL_AIRPORTS[active_leg.destination_icao] then
+                mission_computer_text(
+                    "FUEL ASSURANCE: Full resistance refuel available on every visit")
+            end
+        else
+            mission_computer_text("CAMPAIGN OBJECTIVE UNAVAILABLE")
+        end
+    end
+    mission_computer_text("KEYS RECOVERED: "
+        .. tostring(alignment_keys_recovered) .. " / "
+        .. tostring(TOTAL_ALIGNMENT_KEYS))
+    mission_computer_text("LATEST: " .. tostring(latest_story_event))
     mission_computer_text(
         is_required_campaign_aircraft_loaded()
             and status_message
@@ -2243,6 +2564,15 @@ local function build_fuel_status()
     )
 
     if last_fuel_transfer ~= nil then
+        if last_fuel_transfer.resistance_service then
+            mission_computer_text("")
+            mission_computer_text(string.format(
+                "RESISTANCE SERVICE %s | TRANSFERRED %.0f KG",
+                tostring(last_fuel_transfer.icao or "UNKNOWN"),
+                number_or_zero(last_fuel_transfer.transferred_kg)))
+            mission_computer_text("UNLIMITED SAFE-HAVEN SUPPLY | AIRCRAFT TANKS FULL")
+            return
+        end
         local depot_state = last_fuel_transfer.depot_remaining_kg <= 0
             and "DEPOT DEPLETED"
             or string.format(
@@ -2513,7 +2843,20 @@ function xoof_build_mission_computer_window()
     elseif active_display_page == DISPLAY_PAGE_KEYS then
         mission_computer_text("ALIGNMENT KEYS")
         mission_computer_separator()
-        mission_computer_text("RECOVERED: 0 / 8")
+        mission_computer_text("RECOVERED: "
+            .. tostring(alignment_keys_recovered) .. " / "
+            .. tostring(TOTAL_ALIGNMENT_KEYS))
+        for key_number = 1, TOTAL_ALIGNMENT_KEYS do
+            local key_status = key_number <= alignment_keys_recovered
+                and "RECOVERED" or "OUTSTANDING"
+            mission_computer_text(string.format(
+                "KEY %d // %s", key_number, key_status))
+        end
+        mission_computer_text("")
+        mission_computer_text("ALIGNMENT PROTOCOL: "
+            .. (alignment_protocol_assembled and "ASSEMBLED" or "NOT ASSEMBLED"))
+        mission_computer_text("FINAL TRANSFER: "
+            .. (campaign_completed and "ACCEPTED" or "PENDING"))
     else
         active_display_page = DISPLAY_PAGE_MISSION
         build_mission_page()
