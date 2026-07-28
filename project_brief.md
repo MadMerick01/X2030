@@ -9,7 +9,7 @@
 * X-Plane 12
 * FlyWithLua NG+
 * Lua only
-* Initial aircraft: Cirrus Vision Jet SF50
+* Campaign aircraft: Cirrus Vision Jet SF50 exclusively
 
 ---
 
@@ -29,7 +29,11 @@ carried as a completed alignment protocol to Half Moon Bay.
 
 The central gameplay challenge is fuel scarcity.
 
-Most airports can dispense only **50 kg of jet fuel**, forcing the player to make repeated short flights around the world while managing fuel, runway suitability, aircraft condition and route risk.
+Airport reserves vary by runway-based size class. Smaller airfields generally
+retain more fuel because they attracted less demand and oversight, while major
+airports are more likely to be depleted. This forces the player to make
+repeated short flights around the world while managing fuel, runway suitability,
+aircraft condition and route risk.
 
 The project should feel like a realistic aviation survival thriller rather than an arcade game or exaggerated science-fiction scenario.
 
@@ -309,11 +313,10 @@ The player then:
 8. Chooses the next short hop.
 9. Repeats the process.
 
-Most airports provide only:
-
-**50 kg of jet fuel**
-
-This forces the player to cross the world through many carefully planned short flights.
+Airport fuel is finite and variable. Smaller airfields generally offer the best
+reserves, while large airports provide less fuel and are more likely to be
+depleted. This forces the player to cross the world through many carefully
+planned short flights.
 
 ---
 
@@ -346,7 +349,9 @@ The current FlyWithLua prototype can:
 * identify the nearest airport
 * remember the departure airport
 * prevent fuel delivery after returning immediately to the same airport
-* deliver 50 kg of fuel after landing at a different airport
+* generate finite airport fuel reserves from runway-based size classes
+* favour smaller airfields with larger reserves and give major airports less fuel
+* transfer available airport fuel after landing at a different airport
 * split the fuel evenly between the left and right tanks
 * identify three nearby suggested airports
 * display each suggested airport’s ICAO code
@@ -523,18 +528,30 @@ Do not automatically assume every airport in X-Plane’s navigation database is 
 
 ## Fuel System
 
-The standard airport allocation is currently:
+Ordinary airport reserves currently vary by the longest conventional runway:
 
-**50 kg total**
+* unknown runway: 44-120 kg
+* tiny airport, under 700 m: 144-200 kg
+* small airport, under 1,000 m: 112-176 kg
+* regional airport, under 1,500 m: 72-140 kg
+* large regional airport, under 2,200 m: 32-96 kg
+* major airport, 2,200 m or longer: 0-44 kg
 
-Delivered as:
+The depletion chances are 25 percent for unknown runways, 10 percent for tiny
+airports, 15 percent for small airports, 25 percent for regional airports, 45
+percent for large regional airports and 70 percent for major airports. Tiny
+airports have a 10 percent chance of instead retaining a 176-224 kg high
+reserve. Other eligible classes use a 144-200 kg high-reserve range at their
+configured lower probability.
 
-* 25 kg to the left tank
-* 25 kg to the right tank
+These values are deliberately balanced at 80 percent of the prototype's
+earlier ranges. Fuel transferred to the SF50 is split evenly between its two
+tanks and cannot exceed aircraft capacity. The SF50 is the sole supported
+campaign aircraft, so campaign fuel totals and saves rely on this two-tank
+layout.
 
-Future versions may vary fuel allocation by:
+Future versions may further vary fuel allocation by:
 
-* airport size
 * region
 * AI restrictions
 * campaign difficulty
