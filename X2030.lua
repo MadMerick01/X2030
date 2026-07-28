@@ -388,6 +388,12 @@ local satellite_alert_detail = nil
 local satellite_alert_expires_at = nil
 local satellite_alert_severity = nil
 local satellite_proximity = nil
+-- Test telemetry mirrors the discrete random rolls used by surveillance. It is
+-- intentionally display-only: exposing these values must never alter timing,
+-- probabilities or campaign state while the system is being validated.
+local satellite_acquisition_check_count = 0
+local satellite_last_acquisition_roll = nil
+local satellite_last_hit_roll = nil
 local satellite_coverage_alert_sound = nil
 local satellite_hit_sound = nil
 local satellite_electrical_fire_damage_active = false
@@ -1549,6 +1555,9 @@ local function reset_satellite_tracking(clear_alert)
     satellite_acquisition_chance = 0
     satellite_hit_chance = 0
     satellite_next_event_time = nil
+    satellite_acquisition_check_count = 0
+    satellite_last_acquisition_roll = nil
+    satellite_last_hit_roll = nil
 
     if clear_alert then
         satellite_alert_title = nil
@@ -1736,7 +1745,8 @@ local function update_satellite_surveillance()
             satellite_source_class = coverage.class
             return
         elseif satellite_deadline_reached(satellite_next_event_time) then
-            if math.random() < satellite_hit_chance then
+            satellite_last_hit_roll = math.random()
+            if satellite_last_hit_roll < satellite_hit_chance then
                 apply_satellite_electrical_fire_damage()
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - HIT",
@@ -1813,7 +1823,11 @@ local function update_satellite_surveillance()
     if satellite_state == "WAITING"
         and satellite_deadline_reached(satellite_next_event_time) then
 
-        if math.random() < satellite_acquisition_chance then
+        satellite_acquisition_check_count =
+            satellite_acquisition_check_count + 1
+        satellite_last_acquisition_roll = math.random()
+
+        if satellite_last_acquisition_roll < satellite_acquisition_chance then
             satellite_state = "LOCKED"
             local strike_delay = random_satellite_delay(
                 SATELLITE_LOCK_MIN_SECONDS,
@@ -2918,6 +2932,91 @@ local function build_satellite_page()
     mission_computer_text(
         "THREAT: Satellite surveillance and directed-energy capability"
     )
+
+    -- The threat model uses independent rolls at discrete deadlines rather
+    -- than a continuously increasing danger meter. Showing the live state,
+    -- deadline and most recent rolls makes that behaviour reproducible during
+    -- play-testing without presenting a misleading accumulated percentage.
+    mission_computer_text("")
+    mission_computer_separator()
+    mission_computer_text("TEST TELEMETRY")
+    mission_computer_text("State: " .. tostring(satellite_state or "UNKNOWN"))
+
+    if satellite_source_icao ~= nil then
+        mission_computer_text(string.format(
+            "Source: %s / %s",
+            tostring(satellite_source_icao),
+            tostring(satellite_source_class or "UNKNOWN")
+        ))
+    else
+        mission_computer_text("Source: NONE")
+    end
+
+    mission_computer_text(string.format(
+        "Acquisition chance: %.0f%% per check | Checks: %d",
+        math.max(0, safe_number(satellite_acquisition_chance, 0)) * 100,
+        math.max(0, safe_number(satellite_acquisition_check_count, 0))
+    ))
+    mission_computer_text(string.format(
+        "Hit chance after lock: %.0f%%",
+        math.max(0, safe_number(satellite_hit_chance, 0)) * 100
+    ))
+
+    if satellite_next_event_time ~= nil then
+        local remaining_seconds = math.max(
+            0,
+            math.ceil(
+                safe_number(satellite_next_event_time, satellite_event_time)
+                    - safe_number(satellite_event_time, 0)
+            )
+        )
+        local deadline_label = "Next event"
+        if satellite_state == "WAITING" then
+            deadline_label = "Next acquisition check"
+        elseif satellite_state == "LOCKED" then
+            deadline_label = "Strike solution"
+        elseif satellite_state == "COOLDOWN" then
+            deadline_label = "Cooldown remaining"
+        end
+        mission_computer_text(string.format(
+            "%s: %d seconds",
+            deadline_label,
+            remaining_seconds
+        ))
+    else
+        mission_computer_text("Next event: NOT SCHEDULED")
+    end
+
+    local masking_status = aircraft_is_above_satellite_masking_altitude()
+        and "EXPOSED" or "ACTIVE"
+    mission_computer_text("Terrain masking: " .. masking_status)
+
+    if satellite_last_acquisition_roll ~= nil then
+        local acquisition_result = satellite_last_acquisition_roll
+                < satellite_acquisition_chance
+            and "ACQUIRED" or "NOT ACQUIRED"
+        mission_computer_text(string.format(
+            "Last acquisition roll: %.3f / below %.3f - %s",
+            satellite_last_acquisition_roll,
+            satellite_acquisition_chance,
+            acquisition_result
+        ))
+    else
+        mission_computer_text("Last acquisition roll: NONE")
+    end
+
+    if satellite_last_hit_roll ~= nil then
+        local hit_result = satellite_last_hit_roll < satellite_hit_chance
+            and "HIT" or "MISS"
+        mission_computer_text(string.format(
+            "Last hit roll: %.3f / below %.3f - %s",
+            satellite_last_hit_roll,
+            satellite_hit_chance,
+            hit_result
+        ))
+    else
+        mission_computer_text("Last hit roll: NONE")
+    end
 end
 
 local function build_hops_page()
