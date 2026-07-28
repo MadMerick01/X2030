@@ -62,7 +62,12 @@ Resistance cells at YSNF Norfolk Island and YLHI Lord Howe Island will refill
 the SF50 completely on every safely completed visit. The remaining keys lead
 through Alice Springs, Wakatobi, Paro, Sharjah, St. Johann, Barra and Akureyri.
 After all eight keys have been recovered, they must be carried to displaced NYU
-Tandon researchers on Block Island. The completed Alignment Protocol must then
+Tandon researchers on Block Island. 
+
+<img width="1536" height="1024" alt="KhorFakkan" src="https://github.com/user-attachments/assets/82230bb9-fd50-410b-8586-856ceba6e62e" />
+
+
+The completed Alignment Protocol must then
 be delivered to Half Moon Bay and physically inserted into the original
 company's hardened coastal mainframe.
 
