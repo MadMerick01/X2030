@@ -178,10 +178,12 @@ The player must complete ten story legs across three major stages.
 
 ### Stage One – Recover the Eight Keys
 
-Leg 1 begins at NZMO and requires the player to build enough fuel reserves to
-cross the Tasman Sea to **YSRI Richmond Military Base**, where the first
-alignment key is held. Legs 2 through 8 continue through bunker locations
-around the world and recover the remaining seven keys.
+Leg 1 begins at NZMO with a flight to **YSNF Norfolk Island Airport**. The
+local resistance has secured enough fuel there to fill the SF50's tanks,
+giving the player a safe staging point before continuing across the Tasman Sea
+to **YSRI Richmond Military Base**, where the first alignment key is held.
+Legs 2 through 8 continue through bunker locations around the world and
+recover the remaining seven keys.
 
 ### Stage Two – Assemble the Protocol in London
 
@@ -196,7 +198,7 @@ There, it must be physically inserted into the mainframe connected to the origin
 
 The full campaign therefore follows a route broadly consisting of:
 
-**New Zealand → Richmond → seven further bunkers → London → Silicon Valley**
+**New Zealand → Norfolk Island → Richmond → seven further bunkers → London → Silicon Valley**
 
 The player chooses the exact route.
 
@@ -208,7 +210,8 @@ airports used to obtain enough fuel for each objective.
 ## Primary Gameplay Loop
 
 The player begins at **NZMO Manapouri / Te Anau Airport (TEU)** with limited
-fuel.
+fuel. The first destination is **YSNF Norfolk Island Airport**, where the
+resistance guarantees a full tank for the onward flight to Australia.
 
 The plugin identifies nearby usable airports.
 
