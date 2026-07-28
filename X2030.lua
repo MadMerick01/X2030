@@ -149,13 +149,17 @@ local LEGACY_MAXIMUM_STARTING_FUEL_KG = 100
 local MAX_RECENT_AIRPORT_FUEL_RECORDS = 10
 local POUNDS_PER_KILOGRAM = 2.2046226218
 local FUEL_SAVE_INTERVAL_SECONDS = 30
+-- Manual depot service uses a deliberate five-kilogram planning step. The
+-- final step is clamped to the exact depot stock or free tank capacity so small
+-- residual amounts are never stranded by the interface.
+local FUEL_LOADING_STEP_KG = 5
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
--- Suggestions require a measurable conventional runway, not merely an airport
--- nav-aid entry. This modest floor keeps helipads and malformed runway records
--- out without treating every very short airfield as SF50-suitable.
-local MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES = 300
+-- Suggestions require a measurable conventional runway at least as long as the
+-- SF50's reported minimum takeoff distance. Pilots must still account for
+-- runway condition, elevation, weather and aircraft loading.
+local MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES = 650
 -- Duplicate airport identifiers can exist in third-party scenery. A nav-aid
 -- must therefore also be close to the runway recorded for that identifier.
 local MAX_NAV_AID_TO_RUNWAY_DISTANCE_KM = 5.0
@@ -349,6 +353,7 @@ local profile_name_input = ""
 local profile_status_message = "Select or create a pilot profile."
 local available_saved_campaign = nil
 local available_save_error = nil
+local maintenance_status_message = nil
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -369,6 +374,11 @@ local status_message =
 local last_saved_fuel_signature = nil
 local last_fuel_save_sim_time = nil
 local last_fuel_transfer = nil
+-- Ordinary-airport fuel is staged before transfer. This keeps button presses
+-- from repeatedly modifying X-Plane's tanks and gives the pilot one precise,
+-- reviewable transfer instead.
+local pending_fuel_service = nil
+local selected_fuel_load_kg = 0
 local active_display_page = DISPLAY_PAGE_MISSION
 local display_tab_window = nil
 
@@ -388,6 +398,12 @@ local satellite_alert_detail = nil
 local satellite_alert_expires_at = nil
 local satellite_alert_severity = nil
 local satellite_proximity = nil
+-- Test telemetry mirrors the discrete random rolls used by surveillance. It is
+-- intentionally display-only: exposing these values must never alter timing,
+-- probabilities or campaign state while the system is being validated.
+local satellite_acquisition_check_count = 0
+local satellite_last_acquisition_roll = nil
+local satellite_last_hit_roll = nil
 local satellite_coverage_alert_sound = nil
 local satellite_hit_sound = nil
 local satellite_electrical_fire_damage_active = false
@@ -1212,6 +1228,76 @@ local function update_nearest_airport()
 end
 
 ------------------------------------------------------------
+-- TEMPORARY AIRCRAFT REPAIR
+------------------------------------------------------------
+
+-- Until the campaign's full mechanical-condition system is implemented,
+-- recognised airports can clear X-Plane failures after the SF50 is safely
+-- parked. This deliberately uses the repair-only command rather than X-Plane's
+-- broader servicing command so maintenance cannot bypass scarce airport fuel.
+local function get_aircraft_repair_eligibility()
+    if xoof_on_ground ~= 1 then
+        return false, "LAND AT A RECOGNISED AIRPORT"
+    end
+
+    if not is_number(xoof_groundspeed)
+        or xoof_groundspeed >= STOPPED_SPEED_MPS then
+
+        return false, "BRING AIRCRAFT TO A COMPLETE STOP"
+    end
+
+    local engine_running_value = xoof_engine_running[0]
+    if not is_number(engine_running_value) then
+        return false, "ENGINE STATE COULD NOT BE VERIFIED"
+    end
+
+    if engine_running_value == 1 then
+        return false, "SHUT DOWN ENGINE"
+    end
+
+    -- Refresh at the point of use. Airport navigation data can be absent or
+    -- incomplete, so every invalid result simply makes repair unavailable.
+    update_nearest_airport()
+
+    if nearest_airport == nil then
+        return false, "NO RECOGNISED AIRPORT IN RANGE"
+    end
+
+    if not is_number(nearest_airport_distance_km) then
+        return false, "AIRPORT POSITION COULD NOT BE VERIFIED"
+    end
+
+    if nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
+        return false, "NO RECOGNISED AIRPORT IN RANGE"
+    end
+
+    return true, nearest_airport
+end
+
+local function repair_aircraft_at_airport()
+    local repair_available, repair_detail =
+        get_aircraft_repair_eligibility()
+
+    if not repair_available then
+        maintenance_status_message =
+            "REPAIR UNAVAILABLE // " .. repair_detail
+        return false
+    end
+
+    if type(command_once) ~= "function" then
+        maintenance_status_message =
+            "REPAIR UNAVAILABLE // X-PLANE COMMAND API NOT AVAILABLE"
+        return false
+    end
+
+    command_once("sim/operation/fix_all_systems")
+    maintenance_status_message =
+        "AIRCRAFT REPAIR COMPLETE // ALL REPORTED FAILURES CLEARED AT "
+        .. repair_detail
+    return true
+end
+
+------------------------------------------------------------
 -- LOAD VALID LAND AIRPORTS FROM X-PLANE
 ------------------------------------------------------------
 
@@ -1549,6 +1635,9 @@ local function reset_satellite_tracking(clear_alert)
     satellite_acquisition_chance = 0
     satellite_hit_chance = 0
     satellite_next_event_time = nil
+    satellite_acquisition_check_count = 0
+    satellite_last_acquisition_roll = nil
+    satellite_last_hit_roll = nil
 
     if clear_alert then
         satellite_alert_title = nil
@@ -1736,7 +1825,8 @@ local function update_satellite_surveillance()
             satellite_source_class = coverage.class
             return
         elseif satellite_deadline_reached(satellite_next_event_time) then
-            if math.random() < satellite_hit_chance then
+            satellite_last_hit_roll = math.random()
+            if satellite_last_hit_roll < satellite_hit_chance then
                 apply_satellite_electrical_fire_damage()
                 set_satellite_alert(
                     "DIRECTED-ENERGY STRIKE - HIT",
@@ -1813,7 +1903,11 @@ local function update_satellite_surveillance()
     if satellite_state == "WAITING"
         and satellite_deadline_reached(satellite_next_event_time) then
 
-        if math.random() < satellite_acquisition_chance then
+        satellite_acquisition_check_count =
+            satellite_acquisition_check_count + 1
+        satellite_last_acquisition_roll = math.random()
+
+        if satellite_last_acquisition_roll < satellite_acquisition_chance then
             satellite_state = "LOCKED"
             local strike_delay = random_satellite_delay(
                 SATELLITE_LOCK_MIN_SECONDS,
@@ -2033,7 +2127,7 @@ local function add_balanced_fuel(fuel_amount_kg)
     return true
 end
 
-local function transfer_airport_fuel_to_aircraft(airport_icao)
+local function transfer_airport_fuel_to_aircraft(airport_icao, requested_fuel_kg)
     local record = get_or_create_airport_fuel(
         airport_icao, get_longest_runway_metres(airport_icao))
     if record == nil then
@@ -2049,8 +2143,10 @@ local function transfer_airport_fuel_to_aircraft(airport_icao)
         return nil
     end
 
+    local requested = safe_number(requested_fuel_kg, airport_fuel_before)
+    requested = math.max(0, requested)
     local transferred = clamp(
-        math.min(airport_fuel_before, remaining_capacity),
+        math.min(requested, airport_fuel_before, remaining_capacity),
         0, remaining_capacity)
 
     if transferred > 0 and not add_balanced_fuel(transferred) then
@@ -2077,6 +2173,83 @@ local function transfer_airport_fuel_to_aircraft(airport_icao)
         aircraft_total_kg = get_total_fuel(),
         aircraft_full = remaining_capacity <= transferred + 0.01
     }
+end
+
+-- Open a manual service session without changing either tank. The session is
+-- valid only for the present stopped arrival and is cleared on the next
+-- takeoff, so an ordinary airport still offers its finite reserve only once.
+local function prepare_airport_fuel_service(airport_icao)
+    local record = get_or_create_airport_fuel(
+        airport_icao, get_longest_runway_metres(airport_icao))
+    local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
+    if record == nil or remaining_capacity == nil then
+        return nil
+    end
+
+    touch_airport_fuel_record(airport_icao)
+    local available_fuel = math.max(0, safe_number(record.fuel_kg, 0))
+    pending_fuel_service = {
+        icao = airport_icao
+    }
+    selected_fuel_load_kg = 0
+
+    return {
+        icao = airport_icao,
+        depot_before_kg = available_fuel,
+        transferred_kg = 0,
+        depot_remaining_kg = available_fuel,
+        aircraft_total_kg = get_total_fuel(),
+        aircraft_full = remaining_capacity <= 0.01,
+        awaiting_manual_service = available_fuel > 0
+            and remaining_capacity > 0.01
+    }
+end
+
+local function maximum_selectable_fuel_kg()
+    if pending_fuel_service == nil
+        or pending_fuel_service.icao ~= departure_airport then
+        return 0
+    end
+
+    local record = get_airport_fuel_record(pending_fuel_service.icao)
+    local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
+    if record == nil or remaining_capacity == nil then
+        return 0
+    end
+
+    return math.max(0, math.min(
+        safe_number(record.fuel_kg, 0), remaining_capacity))
+end
+
+local function load_selected_airport_fuel()
+    local maximum_load = maximum_selectable_fuel_kg()
+    local requested_load = clamp(
+        safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+    if requested_load <= 0 or pending_fuel_service == nil then
+        return false
+    end
+
+    local result = transfer_airport_fuel_to_aircraft(
+        pending_fuel_service.icao, requested_load)
+    if result == nil then
+        set_status("Fuel service unavailable. No fuel transferred.")
+        return false
+    end
+
+    selected_fuel_load_kg = 0
+    last_fuel_transfer = result
+    if save_campaign_progress() then
+        set_status(string.format(
+            "Loaded %.0f kg at %s. Depot %.0f kg remaining.",
+            result.transferred_kg, result.icao, result.depot_remaining_kg))
+    else
+        set_status(string.format(
+            "Loaded %.0f kg at %s, but campaign save failed.",
+            result.transferred_kg, result.icao))
+    end
+
+    refresh_airport_suggestions()
+    return true
 end
 
 -- Resistance fuel is an unlimited strategic service rather than an airport
@@ -2191,6 +2364,8 @@ end
 local function inspect_available_profile()
     campaign_started = false
     departure_airport = nil
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     profile_screen_active = true
     overwrite_confirmation_active = false
     suggested_airports = {}
@@ -2245,7 +2420,9 @@ local function validate_new_profile()
     if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO
         or not is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
-        return nil, "Position the aircraft at NZMO to create a profile."
+        return nil,
+            "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau "
+            .. "to create a profile."
     end
 
     local _, aircraft_capacity_kg =
@@ -2275,6 +2452,8 @@ local function create_new_profile()
     pilot_name = new_profile.name
     campaign_starting_fuel_kg = INITIAL_CAMPAIGN_FUEL_KG
     departure_airport = CAMPAIGN_START_AIRPORT_ICAO
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     campaign_started = true
     campaign_leg = 1
     alignment_keys_recovered = 1
@@ -2338,7 +2517,7 @@ local function load_existing_profile()
     if nearest_airport ~= available_saved_campaign.current_airport
         or not is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
-        profile_status_message = "Load the SF50 at "
+        profile_status_message = "Load the Cirrus Vision SF50 at "
             .. available_saved_campaign.current_airport
             .. " to resume this profile."
         return false
@@ -2351,6 +2530,8 @@ local function load_existing_profile()
     end
 
     departure_airport = available_saved_campaign.current_airport
+    pending_fuel_service = nil
+    selected_fuel_load_kg = 0
     pilot_name = available_saved_campaign.pilot_name
     campaign_starting_fuel_kg = available_saved_campaign.starting_fuel_kg
     campaign_leg = available_saved_campaign.campaign_leg or 1
@@ -2404,6 +2585,8 @@ function xoof_update()
     if xoof_on_ground == 0 then
         if not has_been_airborne then
             has_been_airborne = true
+            pending_fuel_service = nil
+            selected_fuel_load_kg = 0
             show_campaign_opening_briefing = false
             current_landing_processed =
                 false
@@ -2500,7 +2683,7 @@ function xoof_update()
             return_without_service = true
         }
     else
-        transfer_result = transfer_airport_fuel_to_aircraft(arrival_airport)
+        transfer_result = prepare_airport_fuel_service(arrival_airport)
     end
 
     if transfer_result == nil then
@@ -2538,6 +2721,8 @@ function xoof_update()
                 set_status(story_event .. " Fuel service unavailable; progress saved.")
             elseif transfer_result.resistance_service then
                 set_status(story_event .. " Resistance tanks filled the SF50.")
+            elseif transfer_result.awaiting_manual_service then
+                set_status(story_event .. " Fuel service ready on the FUEL page.")
             else
                 set_status(story_event .. " Progress saved.")
             end
@@ -2551,9 +2736,12 @@ function xoof_update()
         elseif transfer_result.depot_before_kg <= 0 then
             set_status("Arrived " .. arrival_airport
                 .. ". DEPOT DEPLETED. NO TRANSFER AVAILABLE.")
-        elseif transfer_result.transferred_kg <= 0 then
+        elseif transfer_result.aircraft_full then
             set_status("Arrived " .. arrival_airport
                 .. ". Aircraft tanks full. Depot unchanged.")
+        elseif transfer_result.awaiting_manual_service then
+            set_status("Arrived " .. arrival_airport
+                .. ". Select the required load on the FUEL page.")
         else
             set_status(string.format(
                 "Arrived %s. Transferred %.0f kg; depot %.0f kg. Progress saved.",
@@ -2564,7 +2752,7 @@ function xoof_update()
         set_status(
             "Arrived "
             .. arrival_airport
-            .. ". Fuel delivered, but campaign save failed."
+            .. ". Campaign save failed; fuel state may not be preserved."
         )
     end
 
@@ -2669,18 +2857,43 @@ local function mission_computer_text(value)
     end
 end
 
--- Reserve red text for the location mismatch that prevents a saved profile
--- from loading. Fall back to ordinary text if an older ImGui binding does not
--- expose TextColored, so the access screen remains usable on every install.
+-- Important access-screen information uses restrained semantic colours:
+-- green confirms a usable state, amber identifies a required pilot action and
+-- red reports a fault which prevents the requested operation. Fall back to
+-- ordinary text when an older ImGui binding does not expose TextColored.
+local function mission_computer_colored_text(value, red, green, blue)
+    if imgui ~= nil and type(imgui.TextColored) == "function" then
+        imgui.TextColored(
+            safe_number(red, 1.0),
+            safe_number(green, 1.0),
+            safe_number(blue, 1.0),
+            1.0,
+            tostring(value or "")
+        )
+        return
+    end
+
+    mission_computer_text(value)
+end
+
 local function profile_status_text(value)
     local resolved_text = tostring(value or "")
-    local is_resume_location_warning = string.match(
-        resolved_text, "^Load the SF50 at .+ to resume this profile%.$") ~= nil
+    local is_fault = string.find(resolved_text, "invalid", 1, true) ~= nil
+        or string.find(resolved_text, "unavailable", 1, true) ~= nil
+        or string.find(resolved_text, "could not", 1, true) ~= nil
+        or string.find(resolved_text, "Load the ", 1, true) == 1
+        or string.find(resolved_text, "Position the aircraft", 1, true) == 1
+    local is_confirmation = string.find(
+        resolved_text, "Existing pilot profile detected.", 1, true) ~= nil
+        or string.find(resolved_text, "Profile saved.", 1, true) ~= nil
 
-    if is_resume_location_warning
-        and imgui ~= nil
-        and type(imgui.TextColored) == "function" then
-        imgui.TextColored(1.0, 0.15, 0.15, 1.0, resolved_text)
+    if is_fault then
+        mission_computer_colored_text(resolved_text, 1.0, 0.15, 0.15)
+        return
+    end
+
+    if is_confirmation then
+        mission_computer_colored_text(resolved_text, 0.20, 0.90, 0.42)
         return
     end
 
@@ -2840,7 +3053,65 @@ local function build_fuel_status()
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
 
+    if pending_fuel_service ~= nil
+        and pending_fuel_service.icao == departure_airport then
+        local maximum_load = maximum_selectable_fuel_kg()
+        local service_record = get_airport_fuel_record(
+            pending_fuel_service.icao)
+        local depot_available = service_record ~= nil
+            and math.max(0, safe_number(service_record.fuel_kg, 0)) or 0
+        selected_fuel_load_kg = clamp(
+            safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+
+        mission_computer_text("")
+        mission_computer_separator()
+        mission_computer_text(string.format(
+            "DEPOT SERVICE %s | AVAILABLE %.0f KG",
+            tostring(pending_fuel_service.icao), depot_available))
+        mission_computer_text(string.format(
+            "SELECTED LOAD %.0f KG", selected_fuel_load_kg))
+
+        if imgui ~= nil and type(imgui.Button) == "function" then
+            if imgui.Button("CLEAR", 90, 30) then
+                selected_fuel_load_kg = 0
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("- 5 KG", 90, 30) then
+                selected_fuel_load_kg = math.max(
+                    0, selected_fuel_load_kg - FUEL_LOADING_STEP_KG)
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("+ 5 KG", 90, 30) then
+                selected_fuel_load_kg = math.min(
+                    maximum_load,
+                    selected_fuel_load_kg + FUEL_LOADING_STEP_KG)
+            end
+            if type(imgui.SameLine) == "function" then imgui.SameLine() end
+            if imgui.Button("MAX", 90, 30) then
+                selected_fuel_load_kg = maximum_load
+            end
+
+            local load_label = selected_fuel_load_kg > 0
+                and string.format(
+                    "LOAD SELECTED (%.0f KG)", selected_fuel_load_kg)
+                or "LOAD SELECTED"
+            if imgui.Button(load_label, 240, 34) then
+                load_selected_airport_fuel()
+            end
+        end
+
+        if maximum_load <= 0 then
+            mission_computer_text("NO LOAD AVAILABLE // DEPOT EMPTY OR TANKS FULL")
+        else
+            mission_computer_text(
+                "Adjust the staged quantity, then confirm one precise transfer.")
+        end
+    end
+
     if last_fuel_transfer ~= nil then
+        if last_fuel_transfer.awaiting_manual_service then
+            return
+        end
         if last_fuel_transfer.resistance_service then
             mission_computer_text("")
             mission_computer_text(string.format(
@@ -2918,6 +3189,91 @@ local function build_satellite_page()
     mission_computer_text(
         "THREAT: Satellite surveillance and directed-energy capability"
     )
+
+    -- The threat model uses independent rolls at discrete deadlines rather
+    -- than a continuously increasing danger meter. Showing the live state,
+    -- deadline and most recent rolls makes that behaviour reproducible during
+    -- play-testing without presenting a misleading accumulated percentage.
+    mission_computer_text("")
+    mission_computer_separator()
+    mission_computer_text("TEST TELEMETRY")
+    mission_computer_text("State: " .. tostring(satellite_state or "UNKNOWN"))
+
+    if satellite_source_icao ~= nil then
+        mission_computer_text(string.format(
+            "Source: %s / %s",
+            tostring(satellite_source_icao),
+            tostring(satellite_source_class or "UNKNOWN")
+        ))
+    else
+        mission_computer_text("Source: NONE")
+    end
+
+    mission_computer_text(string.format(
+        "Acquisition chance: %.0f%% per check | Checks: %d",
+        math.max(0, safe_number(satellite_acquisition_chance, 0)) * 100,
+        math.max(0, safe_number(satellite_acquisition_check_count, 0))
+    ))
+    mission_computer_text(string.format(
+        "Hit chance after lock: %.0f%%",
+        math.max(0, safe_number(satellite_hit_chance, 0)) * 100
+    ))
+
+    if satellite_next_event_time ~= nil then
+        local remaining_seconds = math.max(
+            0,
+            math.ceil(
+                safe_number(satellite_next_event_time, satellite_event_time)
+                    - safe_number(satellite_event_time, 0)
+            )
+        )
+        local deadline_label = "Next event"
+        if satellite_state == "WAITING" then
+            deadline_label = "Next acquisition check"
+        elseif satellite_state == "LOCKED" then
+            deadline_label = "Strike solution"
+        elseif satellite_state == "COOLDOWN" then
+            deadline_label = "Cooldown remaining"
+        end
+        mission_computer_text(string.format(
+            "%s: %d seconds",
+            deadline_label,
+            remaining_seconds
+        ))
+    else
+        mission_computer_text("Next event: NOT SCHEDULED")
+    end
+
+    local masking_status = aircraft_is_above_satellite_masking_altitude()
+        and "EXPOSED" or "ACTIVE"
+    mission_computer_text("Terrain masking: " .. masking_status)
+
+    if satellite_last_acquisition_roll ~= nil then
+        local acquisition_result = satellite_last_acquisition_roll
+                < satellite_acquisition_chance
+            and "ACQUIRED" or "NOT ACQUIRED"
+        mission_computer_text(string.format(
+            "Last acquisition roll: %.3f / below %.3f - %s",
+            satellite_last_acquisition_roll,
+            satellite_acquisition_chance,
+            acquisition_result
+        ))
+    else
+        mission_computer_text("Last acquisition roll: NONE")
+    end
+
+    if satellite_last_hit_roll ~= nil then
+        local hit_result = satellite_last_hit_roll < satellite_hit_chance
+            and "HIT" or "MISS"
+        mission_computer_text(string.format(
+            "Last hit roll: %.3f / below %.3f - %s",
+            satellite_last_hit_roll,
+            satellite_hit_chance,
+            hit_result
+        ))
+    else
+        mission_computer_text("Last hit roll: NONE")
+    end
 end
 
 local function build_hops_page()
@@ -3027,6 +3383,15 @@ function xoof_build_mission_computer_window()
         mission_computer_separator()
 
         mission_computer_text("CREATE NEW PILOT PROFILE")
+        mission_computer_colored_text(
+            "FLIGHT SETUP REQUIRED", 1.0, 0.72, 0.20)
+        mission_computer_colored_text(
+            "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau,",
+            1.0, 0.72, 0.20)
+        mission_computer_colored_text(
+            "New Zealand, before creating a pilot profile.",
+            1.0, 0.72, 0.20)
+        mission_computer_text("")
         if type(imgui.InputText) == "function" then
             local first_value, second_value = imgui.InputText(
                 "NAME", profile_name_input, 33)
@@ -3039,7 +3404,6 @@ function xoof_build_mission_computer_window()
             mission_computer_text("Name entry unavailable: ImGui InputText missing.")
         end
 
-        mission_computer_text("ORIGIN: NZMO - MANAPOURI / TE ANAU, NEW ZEALAND")
         mission_computer_text("AIRCRAFT: CIRRUS VISION SF50")
         mission_computer_text(string.format(
             "INITIAL FUEL: %d KG", INITIAL_CAMPAIGN_FUEL_KG))
@@ -3069,9 +3433,15 @@ function xoof_build_mission_computer_window()
             end
             mission_computer_text("PILOT: "
                 .. tostring(available_saved_campaign.pilot_name))
+            mission_computer_colored_text(string.format(
+                "RESUME LOCATION REQUIRED: %s",
+                available_saved_campaign.current_airport),
+                1.0, 0.72, 0.20)
+            mission_computer_colored_text(
+                "Load the Cirrus Vision SF50 there before loading this profile.",
+                1.0, 0.72, 0.20)
             mission_computer_text(string.format(
-                "LOCATION: %s | SAVED FUEL: %.0f KG",
-                available_saved_campaign.current_airport, saved_fuel_total))
+                "SAVED FUEL: %.0f KG", saved_fuel_total))
             if imgui.Button("LOAD PROFILE", 190, 30) then
                 load_existing_profile()
             end
@@ -3117,7 +3487,39 @@ function xoof_build_mission_computer_window()
     elseif active_display_page == DISPLAY_PAGE_MAINTENANCE then
         mission_computer_text("MAINTENANCE")
         mission_computer_separator()
-        mission_computer_text("Aircraft condition data is not yet available.")
+        mission_computer_text("AIRCRAFT REPAIR")
+        mission_computer_text("Full systems repair is available while safely")
+        mission_computer_text("parked at a recognised airport.")
+        mission_computer_text(
+            "Repair clears failures only. Airport fuel reserves are not affected."
+        )
+        mission_computer_text("")
+
+        local repair_available, repair_detail =
+            get_aircraft_repair_eligibility()
+
+        if repair_available then
+            mission_computer_colored_text(
+                "REPAIR FACILITY AVAILABLE // " .. repair_detail,
+                0.20, 0.90, 0.42
+            )
+        else
+            -- Do not leave a previous airport's completion confirmation on
+            -- screen after the aircraft is moved or restarted.
+            maintenance_status_message = nil
+            mission_computer_colored_text(
+                "REPAIR UNAVAILABLE // " .. repair_detail,
+                1.0, 0.72, 0.20
+            )
+        end
+
+        if imgui.Button("REPAIR AIRCRAFT", 190, 30) then
+            repair_aircraft_at_airport()
+        end
+
+        if maintenance_status_message ~= nil then
+            mission_computer_text(maintenance_status_message)
+        end
     elseif active_display_page == DISPLAY_PAGE_KEYS then
         mission_computer_text("ALIGNMENT KEYS")
         mission_computer_separator()

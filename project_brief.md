@@ -308,7 +308,7 @@ The player then:
 3. Lands.
 4. Stops the aircraft.
 5. Shuts down the engine.
-6. Receives the airport’s limited fuel allocation.
+6. Selects and loads fuel from the airport's limited reserve.
 7. Reviews the next available destinations.
 8. Chooses the next short hop.
 9. Repeats the process.
@@ -351,10 +351,12 @@ The current FlyWithLua prototype can:
 * prevent fuel delivery after returning immediately to the same airport
 * generate finite airport fuel reserves from runway-based size classes
 * favour smaller airfields with larger reserves and give major airports less fuel
-* transfer available airport fuel after landing at a different airport
+* stage a pilot-selected fuel load after landing at a different airport
+* provide clear, minus 5 kg, plus 5 kg and maximum-load controls
+* clamp the selected load to both remaining airport fuel and aircraft capacity
 * split the fuel evenly between the left and right tanks
 * identify three nearby suggested airports
-* require suggestions to have a measurable conventional runway of at least 300 m
+* require suggestions to have a measurable conventional runway of at least 650 m
 * display each suggested airport’s ICAO code
 * display distance in nautical miles
 * display approximate heading
@@ -552,10 +554,13 @@ reserve. Other eligible classes use a 144-200 kg high-reserve range at their
 configured lower probability.
 
 These values are deliberately balanced at 80 percent of the prototype's
-earlier ranges. Fuel transferred to the SF50 is split evenly between its two
-tanks and cannot exceed aircraft capacity. The SF50 is the sole supported
-campaign aircraft, so campaign fuel totals and saves rely on this two-tank
-layout.
+earlier ranges. At an ordinary airport the pilot stages a load in 5 kg steps,
+with clear and maximum-load shortcuts, then confirms a single transfer. The
+final step is clamped to the exact depot reserve or free aircraft capacity so
+all usable fuel remains selectable. Fuel transferred to the SF50 is split
+evenly between its two tanks and cannot exceed aircraft capacity. The SF50 is
+the sole supported campaign aircraft, so campaign fuel totals and saves rely on
+this two-tank layout.
 
 Future versions may further vary fuel allocation by:
 
