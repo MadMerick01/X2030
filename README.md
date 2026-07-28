@@ -45,6 +45,8 @@ Fuel distribution was not stopped completely, but it was severely rationed. Serv
 
 The global population became isolated, restricted and afraid.
 
+<img width="1672" height="941" alt="Refueling" src="https://github.com/user-attachments/assets/6a2a2dea-e109-4df9-b19a-022278fbf3fe" />
+
 You own a **Cirrus Vision SF50** and begin your journey at NZMO Manapouri in New
 Zealand. Your eleven-leg mission begins by recovering the first of eight
 physical alignment keys from the Manapouri bunker.
