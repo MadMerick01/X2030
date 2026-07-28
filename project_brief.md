@@ -369,6 +369,12 @@ The current FlyWithLua prototype can:
 * create a named pilot at NZMO with a fixed 100 kg starting allocation
 * explicitly load an existing local profile at its saved airport
 * preserve legacy saves and back up a profile before confirmed replacement
+* estimate light, medium and heavy satellite coverage from nearby runway size
+* allow terrain masking below 1,000 ft AGL to break satellite tracking
+* warn of an imminent directed-energy strike on the main mission page
+* apply an SF50 electrical-bus failure and engine fire after a successful hit
+* play a dedicated laser-impact sound while keeping visual warnings independent
+  of audio availability
 
 ---
 
