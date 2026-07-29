@@ -308,6 +308,13 @@ xoof_engine_running = dataref_table(
     "sim/flightmodel/engine/ENGN_running"
 )
 
+-- X-Plane reports fuel flow per engine in kilograms per second. The campaign
+-- supports the single-engine SF50 exclusively, so the live efficiency monitor
+-- reads engine index zero and compares it with distance travelled over ground.
+xoof_engine_fuel_flow = dataref_table(
+    "sim/flightmodel/engine/ENGN_FF_"
+)
+
 xoof_fuel_tanks = dataref_table(
     "sim/flightmodel/weight/m_fuel"
 )
@@ -2559,6 +2566,10 @@ end
 ------------------------------------------------------------
 
 function xoof_update()
+    -- Update the compact live-efficiency sample before campaign-state returns
+    -- so invalid, paused or ground conditions clear a stale airborne reading.
+    FuelBurnMonitor.update()
+
     -- Aircraft changes normally reload FlyWithLua scripts, but retain this guard
     -- so a mid-session change can never save fuel or advance the SF50 campaign.
     if not is_required_campaign_aircraft_loaded() then
@@ -2773,6 +2784,80 @@ end
 -- the interface does not consume a separate main-chunk local for every helper.
 -- Each function remains private to this script through the local table.
 local MissionComputer = {}
+
+-- Keep the short-period fuel calculation in one global namespace rather than
+-- consuming several scarce FlyWithLua main-chunk local slots. It deliberately
+-- retains only one ten-second accumulator, not a per-frame history buffer.
+FuelBurnMonitor = {
+    sample_seconds = 10,
+    minimum_groundspeed_mps = 25.72,
+    elapsed_seconds = 0,
+    fuel_burned_kg = 0,
+    ground_distance_metres = 0,
+    last_sim_time = nil,
+    recent_kg_per_nm = nil
+}
+
+function FuelBurnMonitor.reset()
+    FuelBurnMonitor.elapsed_seconds = 0
+    FuelBurnMonitor.fuel_burned_kg = 0
+    FuelBurnMonitor.ground_distance_metres = 0
+    FuelBurnMonitor.last_sim_time = nil
+    FuelBurnMonitor.recent_kg_per_nm = nil
+end
+
+function FuelBurnMonitor.update()
+    local current_time = safe_number(xoof_sim_running_time, nil)
+    local groundspeed = safe_number(xoof_groundspeed, nil)
+    local fuel_flow = safe_number(xoof_engine_fuel_flow[0], nil)
+    local valid_flight = campaign_started
+        and is_required_campaign_aircraft_loaded()
+        and xoof_sim_paused == 0
+        and xoof_on_ground == 0
+        and xoof_engine_running[0] == 1
+        and current_time ~= nil
+        and groundspeed ~= nil
+        and groundspeed >= FuelBurnMonitor.minimum_groundspeed_mps
+        and fuel_flow ~= nil
+        and fuel_flow >= 0
+
+    if not valid_flight then
+        FuelBurnMonitor.reset()
+        return
+    end
+
+    if FuelBurnMonitor.last_sim_time == nil then
+        FuelBurnMonitor.last_sim_time = current_time
+        return
+    end
+
+    local elapsed = current_time - FuelBurnMonitor.last_sim_time
+    FuelBurnMonitor.last_sim_time = current_time
+
+    -- A reset or long callback interruption must not create a misleading
+    -- sample from a large time discontinuity.
+    if elapsed <= 0 or elapsed > 5 then
+        FuelBurnMonitor.reset()
+        FuelBurnMonitor.last_sim_time = current_time
+        return
+    end
+
+    FuelBurnMonitor.elapsed_seconds =
+        FuelBurnMonitor.elapsed_seconds + elapsed
+    FuelBurnMonitor.fuel_burned_kg =
+        FuelBurnMonitor.fuel_burned_kg + fuel_flow * elapsed
+    FuelBurnMonitor.ground_distance_metres =
+        FuelBurnMonitor.ground_distance_metres + groundspeed * elapsed
+
+    if FuelBurnMonitor.elapsed_seconds >= FuelBurnMonitor.sample_seconds then
+        local distance_nm = FuelBurnMonitor.ground_distance_metres / 1852
+        FuelBurnMonitor.recent_kg_per_nm = distance_nm > 0
+            and FuelBurnMonitor.fuel_burned_kg / distance_nm or nil
+        FuelBurnMonitor.elapsed_seconds = 0
+        FuelBurnMonitor.fuel_burned_kg = 0
+        FuelBurnMonitor.ground_distance_metres = 0
+    end
+end
 
 function MissionComputer.current_satellite_status()
     if not is_required_campaign_aircraft_loaded() then
@@ -3055,6 +3140,17 @@ function MissionComputer.build_fuel_status()
         number_or_zero(xoof_fuel_tanks[0]),
         number_or_zero(xoof_fuel_tanks[1])
     ))
+    if FuelBurnMonitor.recent_kg_per_nm ~= nil then
+        MissionComputer.mission_computer_text(string.format(
+            "RECENT BURN %.2f KG/NM | %d SEC SAMPLE",
+            FuelBurnMonitor.recent_kg_per_nm,
+            FuelBurnMonitor.sample_seconds
+        ))
+    else
+        MissionComputer.mission_computer_text(
+            "RECENT BURN -- KG/NM | AWAITING STABLE FLIGHT"
+        )
+    end
     MissionComputer.mission_computer_text(
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
     )
