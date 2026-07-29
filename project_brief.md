@@ -361,6 +361,7 @@ The current FlyWithLua prototype can:
 * display distance in nautical miles
 * display approximate heading
 * estimate fuel required
+* display a ten-second recent fuel-burn rate in kilograms per nautical mile
 * read airport runway data from X-Plane’s `apt.dat`
 * identify the longest conventional runway
 * display longest-runway name and length
@@ -574,6 +575,12 @@ Future versions may further vary fuel allocation by:
 Fuel estimates are currently approximate gameplay values.
 
 They are not yet complete SF50 performance calculations.
+
+The FUEL page also reports recent cruise efficiency in kilograms burned per
+nautical mile. It averages the SF50 engine's reported fuel flow and ground
+distance over ten seconds, becomes unavailable below 50 knots or outside valid
+airborne operation, and is intended as live power-setting guidance rather than
+a replacement for the conservative next-hop fuel estimate.
 
 ---
 
