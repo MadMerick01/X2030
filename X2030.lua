@@ -3559,27 +3559,35 @@ function MissionComputer.build_satellite_page()
 
     MissionComputer.mission_computer_text("")
     MissionComputer.mission_computer_separator()
-    MissionComputer.mission_computer_text("MANUAL STRIKE TEST")
-    MissionComputer.mission_computer_colored_text(
-        "CAUTION: Immediately applies SF50 electrical failures and engine fire.",
-        1.0, 0.28, 0.20
+    MissionComputer.mission_computer_text("TEST CONTROLS")
+    MissionComputer.mission_computer_text(
+        "Available only in the airborne SF50 above 1,000 ft AGL."
     )
     MissionComputer.mission_computer_text(
-        "Coverage, masking, acquisition, lock, probability and cooldown are bypassed."
+        "TEST IMPULSE applies motion only; TEST FULL HIT also plays impact audio"
+    )
+    MissionComputer.mission_computer_text(
+        "and applies both electrical-bus failures and the engine fire."
     )
 
-    if imgui.Button("TEST FIRE", 190, 30) then
-        -- Exercise the production strike path directly. Do not change the
-        -- surveillance state or fabricate telemetry rolls: this control
-        -- deliberately bypasses every normal eligibility and probability check.
-        apply_satellite_electrical_fire_damage()
-        set_satellite_alert(
-            "DIRECTED-ENERGY STRIKE - TEST HIT",
-            "Manual test fire applied; surveillance checks were bypassed.",
-            SATELLITE_STRIKE_MESSAGE_SECONDS,
-            "DANGER"
-        )
+    -- Route both buttons through their guarded test functions. Calling the
+    -- production damage function here directly would bypass the SF50, pause,
+    -- airborne, altitude and already-active-impulse checks above.
+    if imgui ~= nil and type(imgui.Button) == "function" then
+        if imgui.Button("TEST IMPULSE", 190, 30) then
+            MissionComputer.test_satellite_impulse()
+        end
+        if type(imgui.SameLine) == "function" then
+            imgui.SameLine()
+        end
+        if imgui.Button("TEST FULL HIT", 190, 30) then
+            MissionComputer.test_satellite_full_hit()
+        end
     end
+
+    MissionComputer.mission_computer_text(
+        tostring(MissionComputer.satellite_test_status)
+    )
 end
 
 function MissionComputer.build_hops_page()
