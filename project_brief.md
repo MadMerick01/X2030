@@ -376,6 +376,10 @@ The current FlyWithLua prototype can:
 * allow terrain masking below 1,000 ft AGL to break satellite tracking
 * warn of an imminent directed-energy strike on the main mission page
 * apply an SF50 electrical-bus failure and engine fire after a successful hit
+* apply a short downward physical impulse with a smaller random lateral kick
+  and a coherent moment selected from virtual SF50 impact zones
+* provide guarded physics-only and full-damage satellite test controls for
+  airborne SF50 testing above the terrain-masking altitude
 * play a dedicated laser-impact sound while keeping visual warnings independent
   of audio availability
 

@@ -4,8 +4,8 @@
 
 1. Download the latest release file.
 2. Extract the downloaded archive.
-3. Copy `X2030.lua` and the `Sounds` folder into the FlyWithLua `Scripts`
-   folder:
+3. Copy `X2030.lua`, `X2030_Impact.lua` and the `Sounds` folder into the
+   FlyWithLua `Scripts` folder:
 
 ```text
 X-Plane 12/
@@ -14,6 +14,7 @@ X-Plane 12/
         └── FlyWithLua/
             └── Scripts/
                 ├── X2030.lua
+                ├── X2030_Impact.lua
                 └── Sounds/
                     └── Satallite_coverage_alert.wav
 ```
