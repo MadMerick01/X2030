@@ -4,8 +4,9 @@
 
 1. Download the latest release file.
 2. Extract the downloaded archive.
-3. Copy `X2030.lua`, `X2030_Impact.lua` and the `Sounds` folder into the
-   FlyWithLua `Scripts` folder:
+3. Copy `X2030.lua`, `X2030_Impact.lua`, and the `Sounds` and `images` folders
+   into the FlyWithLua `Scripts` folder. Preserve these folder names; the Lua
+   script builds platform-correct paths with FlyWithLua's directory separator:
 
 ```text
 X-Plane 12/
@@ -15,11 +16,19 @@ X-Plane 12/
             └── Scripts/
                 ├── X2030.lua
                 ├── X2030_Impact.lua
-                └── Sounds/
-                    └── Satallite_coverage_alert.wav
+                ├── Sounds/
+                │   ├── Satallite_coverage_alert.wav
+                │   └── laser_hit1.wav
+                └── images/
+                    └── Manapouri.png
 ```
 
 > **Requirement:** FlyWithLua must already be installed in X-Plane 12.
+
+The optional `manapouri_bunker_message.wav` and
+`half_moon_bay_message.wav` recordings may also be placed in `Sounds`. Missing,
+unreadable, or non-PCM optional recordings are skipped without stopping the
+campaign.
 
 4. Start X-Plane 12.
 5. Select the **Cirrus Vision SF50**.

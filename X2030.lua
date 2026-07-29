@@ -478,23 +478,83 @@ function CampaignHelpers.set_status(message)
     )
 end
 
-function CampaignHelpers.campaign_sound_file_has_wav_header(sound_path)
+function CampaignHelpers.campaign_sound_file_is_pcm_wav(sound_path)
     local sound_file = io.open(sound_path, "rb")
     if sound_file == nil then
         return false, "file is missing or unreadable"
     end
 
-    -- OpenAL needs a real WAV container, not merely a file carrying a .wav
-    -- suffix. Checking the container signature here gives a useful diagnostic
-    -- before FlyWithLua reduces all load failures to buffer handle 0.
+    -- FlyWithLua NG+'s load_WAV_file accepts uncompressed PCM WAV data. Merely
+    -- checking the RIFF/WAVE signature is insufficient: IEEE-float and other
+    -- encoded WAV files have that same signature and make FlyWithLua raise an
+    -- error. Inspect the format chunk before the plugin ever sees the file.
     local header = sound_file:read(12)
-    sound_file:close()
-
     if header == nil or #header < 12
         or string.sub(header, 1, 4) ~= "RIFF"
         or string.sub(header, 9, 12) ~= "WAVE" then
-
+        sound_file:close()
         return false, "file is not a RIFF/WAVE recording"
+    end
+
+    local function little_endian_uint16(bytes)
+        if bytes == nil or #bytes < 2 then
+            return nil
+        end
+        return string.byte(bytes, 1) + string.byte(bytes, 2) * 256
+    end
+
+    local function little_endian_uint32(bytes)
+        if bytes == nil or #bytes < 4 then
+            return nil
+        end
+        return string.byte(bytes, 1)
+            + string.byte(bytes, 2) * 256
+            + string.byte(bytes, 3) * 65536
+            + string.byte(bytes, 4) * 16777216
+    end
+
+    local pcm_format_found = false
+    local data_chunk_found = false
+
+    while true do
+        local chunk_header = sound_file:read(8)
+        if chunk_header == nil or #chunk_header < 8 then
+            break
+        end
+
+        local chunk_name = string.sub(chunk_header, 1, 4)
+        local chunk_size = little_endian_uint32(string.sub(chunk_header, 5, 8))
+        if chunk_size == nil then
+            break
+        end
+
+        if chunk_name == "fmt " then
+            local format_fields = sound_file:read(math.min(chunk_size, 16))
+            local format_code = little_endian_uint16(format_fields)
+            pcm_format_found = format_code == 1
+            if chunk_size > 16 then
+                sound_file:seek("cur", chunk_size - 16)
+            end
+        elseif chunk_name == "data" then
+            data_chunk_found = chunk_size > 0
+            sound_file:seek("cur", chunk_size)
+        else
+            sound_file:seek("cur", chunk_size)
+        end
+
+        -- RIFF chunks are padded to an even byte boundary.
+        if chunk_size % 2 == 1 then
+            sound_file:seek("cur", 1)
+        end
+    end
+
+    sound_file:close()
+
+    if not pcm_format_found then
+        return false, "WAV encoding is not uncompressed PCM (format 1)"
+    end
+    if not data_chunk_found then
+        return false, "WAV contains no readable audio data"
     end
 
     return true, nil
@@ -502,7 +562,7 @@ end
 
 function CampaignHelpers.load_campaign_sound(sound_path, description, optional)
     local valid_file, validation_error =
-        CampaignHelpers.campaign_sound_file_has_wav_header(sound_path)
+        CampaignHelpers.campaign_sound_file_is_pcm_wav(sound_path)
 
     if not valid_file then
         local availability = optional and "Optional recording unavailable: "
@@ -511,6 +571,12 @@ function CampaignHelpers.load_campaign_sound(sound_path, description, optional)
             "[X2030 AUDIO] " .. availability .. sound_path
                 .. " (" .. validation_error .. ")"
         )
+        return nil
+    end
+
+    if type(load_WAV_file) ~= "function" then
+        logMsg("[X2030 AUDIO] FlyWithLua WAV API is unavailable; skipped "
+            .. tostring(description) .. ".")
         return nil
     end
 
@@ -3887,27 +3953,37 @@ function MissionComputer.create_mission_computer_window()
         return
     end
 
-    -- float_wnd_load_image associates the texture with this window. Check the
-    -- file and API first so missing imagery never interrupts campaign startup.
+    -- NG+ 2.8.14 takes exactly one argument here: the image filename. The
+    -- returned texture reference is later passed to imgui.Image; the floating
+    -- window itself is not an argument to float_wnd_load_image.
     local image_file = io.open(MANAPOURI_BRIEFING_IMAGE_PATH, "rb")
     if image_file == nil then
         manapouri_briefing_image_status = "FILE MISSING"
         logMsg("[X2030] Manapouri briefing image unavailable: file missing")
     else
+        local image_signature = image_file:read(8)
         image_file:close()
-        if type(float_wnd_load_image) ~= "function" then
+        if image_signature ~= "\137PNG\13\10\26\10" then
+            manapouri_briefing_image_status = "FILE UNREADABLE"
+            logMsg("[X2030] Manapouri briefing image unavailable: invalid PNG")
+        elseif type(float_wnd_load_image) ~= "function" then
             manapouri_briefing_image_status = "IMAGE API MISSING"
             logMsg("[X2030] Manapouri briefing image unavailable: image API missing")
         else
-            manapouri_briefing_image = float_wnd_load_image(
-                display_tab_window,
+            local image_loaded_ok, image_reference = pcall(
+                float_wnd_load_image,
                 MANAPOURI_BRIEFING_IMAGE_PATH
             )
-            if manapouri_briefing_image == nil then
-                manapouri_briefing_image_status = "LOAD FAILED"
-                logMsg("[X2030] Manapouri briefing image failed to load")
-            else
+            local numeric_image_reference = tonumber(image_reference)
+            if image_loaded_ok and numeric_image_reference ~= nil
+                and numeric_image_reference > 0 then
+                manapouri_briefing_image = image_reference
                 manapouri_briefing_image_status = "READY"
+            else
+                manapouri_briefing_image = nil
+                manapouri_briefing_image_status = "LOAD FAILED"
+                logMsg("[X2030] Manapouri briefing image failed to load: "
+                    .. tostring(image_reference))
             end
         end
     end
