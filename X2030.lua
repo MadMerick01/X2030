@@ -463,7 +463,14 @@ local half_moon_bay_message_sound = nil
 -- GENERAL UTILITY FUNCTIONS
 ------------------------------------------------------------
 
-local function set_status(message)
+-- Keep utility functions on one module table rather than declaring every
+-- helper as a chunk-level local. Lua 5.1 (and therefore FlyWithLua) permits at
+-- most 200 locals in a function, with the script's top-level chunk counting as
+-- a function. Keeping these related helpers together leaves safe headroom for
+-- future campaign state while avoiding generic names in the global namespace.
+local CampaignHelpers = {}
+
+function CampaignHelpers.set_status(message)
     status_message = message
 
     logMsg(
@@ -471,7 +478,7 @@ local function set_status(message)
     )
 end
 
-local function campaign_sound_file_has_wav_header(sound_path)
+function CampaignHelpers.campaign_sound_file_has_wav_header(sound_path)
     local sound_file = io.open(sound_path, "rb")
     if sound_file == nil then
         return false, "file is missing or unreadable"
@@ -493,9 +500,9 @@ local function campaign_sound_file_has_wav_header(sound_path)
     return true, nil
 end
 
-local function load_campaign_sound(sound_path, description, optional)
+function CampaignHelpers.load_campaign_sound(sound_path, description, optional)
     local valid_file, validation_error =
-        campaign_sound_file_has_wav_header(sound_path)
+        CampaignHelpers.campaign_sound_file_has_wav_header(sound_path)
 
     if not valid_file then
         local availability = optional and "Optional recording unavailable: "
@@ -524,15 +531,15 @@ local function load_campaign_sound(sound_path, description, optional)
     return sound_handle
 end
 
-local function load_campaign_sounds()
+function CampaignHelpers.load_campaign_sounds()
     -- Audio is supplementary: a missing or invalid WAV must never prevent the
     -- visual satellite warning or the rest of the campaign from operating.
-    satellite_coverage_alert_sound = load_campaign_sound(
+    satellite_coverage_alert_sound = CampaignHelpers.load_campaign_sound(
         SATELLITE_COVERAGE_ALERT_PATH,
         "satellite coverage alert",
         false
     )
-    satellite_hit_sound = load_campaign_sound(
+    satellite_hit_sound = CampaignHelpers.load_campaign_sound(
         SATELLITE_HIT_SOUND_PATH,
         "satellite strike impact",
         false
@@ -540,13 +547,13 @@ local function load_campaign_sounds()
 
     -- These two files are intentional placeholders. Fail quietly apart from a
     -- log entry until the recorded campaign messages are added later.
-    manapouri_message_sound = load_campaign_sound(
+    manapouri_message_sound = CampaignHelpers.load_campaign_sound(
         MANAPOURI_MESSAGE_PATH, "Manapouri bunker message", true)
-    half_moon_bay_message_sound = load_campaign_sound(
+    half_moon_bay_message_sound = CampaignHelpers.load_campaign_sound(
         HALF_MOON_BAY_MESSAGE_PATH, "Half Moon Bay message", true)
 end
 
-local function play_optional_campaign_message(sound_handle, description)
+function CampaignHelpers.play_optional_campaign_message(sound_handle, description)
     if sound_handle == nil then
         return false
     end
@@ -560,7 +567,7 @@ local function play_optional_campaign_message(sound_handle, description)
     return true
 end
 
-local function play_satellite_coverage_alert()
+function CampaignHelpers.play_satellite_coverage_alert()
     if satellite_coverage_alert_sound == nil then
         return
     end
@@ -571,7 +578,7 @@ local function play_satellite_coverage_alert()
     end
 end
 
-local function play_satellite_hit_sound()
+function CampaignHelpers.play_satellite_hit_sound()
     if satellite_hit_sound == nil then
         return
     end
@@ -582,34 +589,34 @@ local function play_satellite_hit_sound()
     end
 end
 
-local function degrees_to_radians(degrees)
+function CampaignHelpers.degrees_to_radians(degrees)
     return degrees * math.pi / 180
 end
 
-local function radians_to_degrees(radians)
+function CampaignHelpers.radians_to_degrees(radians)
     return radians * 180 / math.pi
 end
 
-local function kilometres_to_nautical_miles(km)
+function CampaignHelpers.kilometres_to_nautical_miles(km)
     return km / 1.852
 end
 
-local function is_number(value)
+function CampaignHelpers.is_number(value)
     return type(value) == "number"
         and value == value
         and value ~= math.huge
         and value ~= -math.huge
 end
 
-local function number_or_zero(value)
-    if is_number(value) then
+function CampaignHelpers.number_or_zero(value)
+    if CampaignHelpers.is_number(value) then
         return value
     end
 
     return 0
 end
 
-local function safe_number(value, fallback)
+function CampaignHelpers.safe_number(value, fallback)
     local converted = tonumber(value)
 
     if converted == nil
@@ -623,12 +630,12 @@ local function safe_number(value, fallback)
     return converted
 end
 
-local function clamp(value, minimum, maximum)
-    local safe_value = safe_number(value, minimum)
+function CampaignHelpers.clamp(value, minimum, maximum)
+    local safe_value = CampaignHelpers.safe_number(value, minimum)
     return math.max(minimum, math.min(maximum, safe_value))
 end
 
-local function is_required_campaign_aircraft_loaded()
+function CampaignHelpers.is_required_campaign_aircraft_loaded()
     if type(xoof_aircraft_icao) ~= "string" then
         return false
     end
@@ -640,13 +647,13 @@ local function is_required_campaign_aircraft_loaded()
     return normalised_aircraft_icao == REQUIRED_AIRCRAFT_ICAO
 end
 
-local function aircraft_requirement_message()
+function CampaignHelpers.aircraft_requirement_message()
     return "Load the "
         .. REQUIRED_AIRCRAFT_NAME
         .. " to continue the campaign."
 end
 
-local function is_valid_airport_identifier(value)
+function CampaignHelpers.is_valid_airport_identifier(value)
     return type(value) == "string"
         and string.match(value, "^[A-Z0-9][A-Z0-9]+$") ~= nil
         and #value >= 3
@@ -658,7 +665,7 @@ end
 ------------------------------------------------------------
 
 local function get_airport_fuel_record(airport_icao)
-    if not is_valid_airport_identifier(airport_icao) then
+    if not CampaignHelpers.is_valid_airport_identifier(airport_icao) then
         return nil
     end
 
@@ -679,14 +686,14 @@ end
 local function build_protected_airport_set()
     local protected_icaos = {}
 
-    if is_valid_airport_identifier(departure_airport) then
+    if CampaignHelpers.is_valid_airport_identifier(departure_airport) then
         protected_icaos[departure_airport] = true
     end
 
     for index = 1, 3 do
         local suggestion = suggested_airports[index]
         if suggestion ~= nil
-            and is_valid_airport_identifier(suggestion.icao) then
+            and CampaignHelpers.is_valid_airport_identifier(suggestion.icao) then
             protected_icaos[suggestion.icao] = true
         end
     end
@@ -708,7 +715,7 @@ local function remove_oldest_airport_fuel_record(protected_icaos)
             return
         end
 
-        local access = safe_number(record.last_access, -1)
+        local access = CampaignHelpers.safe_number(record.last_access, -1)
         if access < oldest_access then
             oldest_icao = icao
             oldest_access = access
@@ -737,7 +744,7 @@ local function remove_oldest_airport_fuel_record(protected_icaos)
 end
 
 local function classify_airport_by_runway(runway_length_m)
-    local runway = safe_number(runway_length_m, nil)
+    local runway = CampaignHelpers.safe_number(runway_length_m, nil)
 
     if runway == nil or runway <= 0 then
         return "UNKNOWN", 44, 120, 0.25, 0.05
@@ -777,25 +784,25 @@ local function generate_initial_airport_fuel(airport_icao, runway_length_m)
 end
 
 local function get_or_create_airport_fuel(airport_icao, runway_length_m)
-    if not is_valid_airport_identifier(airport_icao) then
+    if not CampaignHelpers.is_valid_airport_identifier(airport_icao) then
         logMsg("[X2030 FUEL] Invalid airport identifier; fuel unavailable")
         return nil
     end
 
     local existing = get_airport_fuel_record(airport_icao)
     if existing ~= nil then
-        local stored_fuel = safe_number(existing.fuel_kg, nil)
+        local stored_fuel = CampaignHelpers.safe_number(existing.fuel_kg, nil)
         if stored_fuel == nil or stored_fuel < 0 then
             logMsg("[X2030 FUEL] Invalid stored fuel for "
                 .. airport_icao .. "; using 0 kg")
             stored_fuel = 0
         end
 
-        local initial_fuel = safe_number(
+        local initial_fuel = CampaignHelpers.safe_number(
             existing.initial_fuel_kg, stored_fuel)
         initial_fuel = math.max(stored_fuel, initial_fuel, 0)
         existing.initial_fuel_kg = initial_fuel
-        existing.fuel_kg = clamp(stored_fuel, 0, initial_fuel)
+        existing.fuel_kg = CampaignHelpers.clamp(stored_fuel, 0, initial_fuel)
         touch_airport_fuel_record(airport_icao)
         return existing
     end
@@ -821,7 +828,7 @@ local function get_or_create_airport_fuel(airport_icao, runway_length_m)
         icao = airport_icao,
         fuel_kg = fuel_kg,
         initial_fuel_kg = fuel_kg,
-        runway_length_m = safe_number(runway_length_m, nil),
+        runway_length_m = CampaignHelpers.safe_number(runway_length_m, nil),
         size_class = size_class,
         last_access = airport_fuel_access_counter
     }
@@ -873,7 +880,7 @@ local function load_campaign_save()
             and save_version ~= 3
             and save_version ~= CAMPAIGN_SAVE_VERSION)
         or saved_values.campaign_started ~= "1"
-        or not is_valid_airport_identifier(
+        or not CampaignHelpers.is_valid_airport_identifier(
             saved_values.current_airport
         ) then
 
@@ -885,7 +892,7 @@ local function load_campaign_save()
         local saved_starting_fuel = tonumber(saved_values.starting_fuel_kg)
         if #saved_name < 2 or #saved_name > 32
             or string.find(saved_name, "[^%w%s%-%']")
-            or not is_number(saved_starting_fuel)
+            or not CampaignHelpers.is_number(saved_starting_fuel)
             or saved_starting_fuel ~= math.floor(saved_starting_fuel)
             or saved_starting_fuel < LEGACY_MINIMUM_STARTING_FUEL_KG
             or saved_starting_fuel > LEGACY_MAXIMUM_STARTING_FUEL_KG then
@@ -956,7 +963,7 @@ end
 
 local function save_campaign_progress()
     if not campaign_started
-        or not is_valid_airport_identifier(
+        or not CampaignHelpers.is_valid_airport_identifier(
             departure_airport
         ) then
 
@@ -992,7 +999,7 @@ local function save_campaign_progress()
     for tank = 0, 1 do
         save_file:write(
             "fuel_tank_", tostring(tank), "=",
-            string.format("%.3f", number_or_zero(xoof_fuel_tanks[tank])),
+            string.format("%.3f", CampaignHelpers.number_or_zero(xoof_fuel_tanks[tank])),
             "\n"
         )
     end
@@ -1019,12 +1026,12 @@ local function save_campaign_progress()
     for tank = 0, 1 do
         saved_tanks[#saved_tanks + 1] = string.format(
             "%.3f",
-            number_or_zero(xoof_fuel_tanks[tank])
+            CampaignHelpers.number_or_zero(xoof_fuel_tanks[tank])
         )
     end
 
     last_saved_fuel_signature = table.concat(saved_tanks, ",")
-    last_fuel_save_sim_time = safe_number(xoof_sim_running_time, nil)
+    last_fuel_save_sim_time = CampaignHelpers.safe_number(xoof_sim_running_time, nil)
 
     return true
 end
@@ -1064,7 +1071,7 @@ local function save_fuel_if_changed()
     for tank = 0, 1 do
         current_tanks[#current_tanks + 1] = string.format(
             "%.3f",
-            number_or_zero(xoof_fuel_tanks[tank])
+            CampaignHelpers.number_or_zero(xoof_fuel_tanks[tank])
         )
     end
 
@@ -1073,7 +1080,7 @@ local function save_fuel_if_changed()
         return
     end
 
-    local current_sim_time = safe_number(xoof_sim_running_time, nil)
+    local current_sim_time = CampaignHelpers.safe_number(xoof_sim_running_time, nil)
     if current_sim_time == nil then
         return
     end
@@ -1093,7 +1100,7 @@ local function restore_saved_fuel(saved_fuel_tanks)
     for tank = 0, 1 do
         local saved_fuel = saved_fuel_tanks[tank]
 
-        if is_number(saved_fuel) and saved_fuel >= 0 then
+        if CampaignHelpers.is_number(saved_fuel) and saved_fuel >= 0 then
             xoof_fuel_tanks[tank] = saved_fuel
         end
     end
@@ -1112,16 +1119,16 @@ local function calculate_distance_km(
     local earth_radius_km = 6371.0
 
     local latitude_difference =
-        degrees_to_radians(lat2 - lat1)
+        CampaignHelpers.degrees_to_radians(lat2 - lat1)
 
     local longitude_difference =
-        degrees_to_radians(lon2 - lon1)
+        CampaignHelpers.degrees_to_radians(lon2 - lon1)
 
     local first_latitude =
-        degrees_to_radians(lat1)
+        CampaignHelpers.degrees_to_radians(lat1)
 
     local second_latitude =
-        degrees_to_radians(lat2)
+        CampaignHelpers.degrees_to_radians(lat2)
 
     local a =
         math.sin(latitude_difference / 2) ^ 2
@@ -1150,13 +1157,13 @@ local function calculate_initial_heading(
     lon2
 )
     local start_lat =
-        degrees_to_radians(lat1)
+        CampaignHelpers.degrees_to_radians(lat1)
 
     local destination_lat =
-        degrees_to_radians(lat2)
+        CampaignHelpers.degrees_to_radians(lat2)
 
     local longitude_difference =
-        degrees_to_radians(lon2 - lon1)
+        CampaignHelpers.degrees_to_radians(lon2 - lon1)
 
     local y =
         math.sin(longitude_difference)
@@ -1175,7 +1182,7 @@ local function calculate_initial_heading(
         math.cos(longitude_difference)
 
     local heading =
-        radians_to_degrees(math.atan2(y, x))
+        CampaignHelpers.radians_to_degrees(math.atan2(y, x))
 
     heading = (heading + 360) % 360
 
@@ -1288,14 +1295,14 @@ local function get_aircraft_repair_eligibility()
         return false, "LAND AT A RECOGNISED AIRPORT"
     end
 
-    if not is_number(xoof_groundspeed)
+    if not CampaignHelpers.is_number(xoof_groundspeed)
         or xoof_groundspeed >= STOPPED_SPEED_MPS then
 
         return false, "BRING AIRCRAFT TO A COMPLETE STOP"
     end
 
     local engine_running_value = xoof_engine_running[0]
-    if not is_number(engine_running_value) then
+    if not CampaignHelpers.is_number(engine_running_value) then
         return false, "ENGINE STATE COULD NOT BE VERIFIED"
     end
 
@@ -1311,7 +1318,7 @@ local function get_aircraft_repair_eligibility()
         return false, "NO RECOGNISED AIRPORT IN RANGE"
     end
 
-    if not is_number(nearest_airport_distance_km) then
+    if not CampaignHelpers.is_number(nearest_airport_distance_km) then
         return false, "AIRPORT POSITION COULD NOT BE VERIFIED"
     end
 
@@ -1377,7 +1384,7 @@ local function load_valid_land_airports()
         io.open(apt_dat_path, "r")
 
     if airport_file == nil then
-        set_status(
+        CampaignHelpers.set_status(
             "Could not open X-Plane airport database."
         )
 
@@ -1514,7 +1521,7 @@ local function is_valid_suggested_airport(icao, latitude, longitude)
         return false
     end
 
-    local runway_length = safe_number(
+    local runway_length = CampaignHelpers.safe_number(
         airport_data.longest_runway_metres, nil)
     if runway_length == nil
         or runway_length < MINIMUM_SUGGESTED_RUNWAY_LENGTH_METRES then
@@ -1526,10 +1533,10 @@ local function is_valid_suggested_airport(icao, latitude, longitude)
     -- the same facility as the conventional runway found in apt.dat. This
     -- prevents a heliport sharing an identifier with an airfield from being
     -- offered at the heliport's position. Missing coordinates fail safely.
-    local nav_latitude = safe_number(latitude, nil)
-    local nav_longitude = safe_number(longitude, nil)
-    local runway_latitude = safe_number(airport_data.latitude, nil)
-    local runway_longitude = safe_number(airport_data.longitude, nil)
+    local nav_latitude = CampaignHelpers.safe_number(latitude, nil)
+    local nav_longitude = CampaignHelpers.safe_number(longitude, nil)
+    local runway_latitude = CampaignHelpers.safe_number(airport_data.latitude, nil)
+    local runway_longitude = CampaignHelpers.safe_number(airport_data.longitude, nil)
 
     if nav_latitude == nil or nav_longitude == nil
         or runway_latitude == nil or runway_longitude == nil then
@@ -1544,7 +1551,7 @@ local function is_valid_suggested_airport(icao, latitude, longitude)
         runway_longitude
     )
 
-    if not is_number(nav_aid_distance_km)
+    if not CampaignHelpers.is_number(nav_aid_distance_km)
         or nav_aid_distance_km > MAX_NAV_AID_TO_RUNWAY_DISTANCE_KM then
 
         return false
@@ -1557,7 +1564,7 @@ local function get_longest_runway_metres(icao)
     local airport_data = valid_land_airports[icao]
 
     if airport_data == nil
-        or not is_number(
+        or not CampaignHelpers.is_number(
             airport_data.longest_runway_metres
         ) then
 
@@ -1572,8 +1579,8 @@ end
 ------------------------------------------------------------
 
 local function random_satellite_delay(minimum_seconds, maximum_seconds)
-    local safe_minimum = safe_number(minimum_seconds, nil)
-    local safe_maximum = safe_number(maximum_seconds, nil)
+    local safe_minimum = CampaignHelpers.safe_number(minimum_seconds, nil)
+    local safe_maximum = CampaignHelpers.safe_number(maximum_seconds, nil)
 
     if safe_minimum == nil or safe_maximum == nil
         or safe_minimum < 0 or safe_maximum < safe_minimum then
@@ -1602,7 +1609,7 @@ local function set_satellite_alert(
     if duration_seconds == nil then
         satellite_alert_expires_at = nil
     else
-        local valid_duration = safe_number(duration_seconds, nil)
+        local valid_duration = CampaignHelpers.safe_number(duration_seconds, nil)
         if valid_duration ~= nil and valid_duration > 0 then
             satellite_alert_expires_at = satellite_event_time + valid_duration
         else
@@ -1620,7 +1627,7 @@ local function set_satellite_alert(
 end
 
 local function satellite_deadline_reached(deadline)
-    local valid_deadline = safe_number(deadline, nil)
+    local valid_deadline = CampaignHelpers.safe_number(deadline, nil)
     return valid_deadline ~= nil and satellite_event_time >= valid_deadline
 end
 
@@ -1636,7 +1643,7 @@ local function clear_satellite_alert_if_expired()
 end
 
 local function advance_satellite_event_time()
-    local current_time = safe_number(xoof_sim_running_time, nil)
+    local current_time = CampaignHelpers.safe_number(xoof_sim_running_time, nil)
 
     if current_time == nil then
         satellite_last_sim_time = nil
@@ -1656,7 +1663,7 @@ local function advance_satellite_event_time()
 end
 
 local function get_satellite_coverage(runway_length_m)
-    local runway = safe_number(runway_length_m, nil)
+    local runway = CampaignHelpers.safe_number(runway_length_m, nil)
 
     if runway == nil or runway < SATELLITE_LIGHT_RUNWAY_MIN_M then
         return nil
@@ -1719,8 +1726,8 @@ end
 -- tick. The nearest boundary therefore moves with the aircraft even when no
 -- alert is active. Invalid apt.dat coordinates are skipped individually.
 local function current_nearest_satellite_coverage()
-    local aircraft_latitude = safe_number(xoof_latitude, nil)
-    local aircraft_longitude = safe_number(xoof_longitude, nil)
+    local aircraft_latitude = CampaignHelpers.safe_number(xoof_latitude, nil)
+    local aircraft_longitude = CampaignHelpers.safe_number(xoof_longitude, nil)
 
     satellite_proximity = {
         data_available = false,
@@ -1738,8 +1745,8 @@ local function current_nearest_satellite_coverage()
     for airport_icao, airport_data in pairs(valid_land_airports) do
         local coverage_class, radius_nm, acquisition_chance, hit_chance =
             get_satellite_coverage(airport_data.longest_runway_metres)
-        local airport_latitude = safe_number(airport_data.latitude, nil)
-        local airport_longitude = safe_number(airport_data.longitude, nil)
+        local airport_latitude = CampaignHelpers.safe_number(airport_data.latitude, nil)
+        local airport_longitude = CampaignHelpers.safe_number(airport_data.longitude, nil)
 
         if coverage_class ~= nil
             and airport_latitude ~= nil
@@ -1747,7 +1754,7 @@ local function current_nearest_satellite_coverage()
 
             satellite_proximity.data_available = true
 
-            local distance_nm = kilometres_to_nautical_miles(
+            local distance_nm = CampaignHelpers.kilometres_to_nautical_miles(
                 calculate_distance_km(
                     aircraft_latitude,
                     aircraft_longitude,
@@ -1756,7 +1763,7 @@ local function current_nearest_satellite_coverage()
                 )
             )
 
-            if is_number(distance_nm) then
+            if CampaignHelpers.is_number(distance_nm) then
                 local candidate = {
                     icao = airport_icao,
                     class = coverage_class,
@@ -1790,7 +1797,7 @@ local function current_nearest_satellite_coverage()
 end
 
 local function aircraft_is_above_satellite_masking_altitude()
-    local altitude_metres = safe_number(xoof_altitude_agl_metres, nil)
+    local altitude_metres = CampaignHelpers.safe_number(xoof_altitude_agl_metres, nil)
     return altitude_metres ~= nil
         and altitude_metres
             > SATELLITE_MASKING_ALTITUDE_FT * METRES_PER_FOOT
@@ -1811,7 +1818,7 @@ local function apply_satellite_electrical_fire_damage()
     xoof_failure_bus_2 = XPLANE_FAILURE_INOPERATIVE
     xoof_failure_engine_1_fire = XPLANE_FAILURE_INOPERATIVE
     satellite_electrical_fire_damage_active = true
-    play_satellite_hit_sound()
+    CampaignHelpers.play_satellite_hit_sound()
 
     -- Damage remains authoritative even if an incomplete FlyWithLua install
     -- cannot run the supplementary physical impulse.
@@ -1928,7 +1935,7 @@ local function update_satellite_surveillance()
     if source_changed then
         -- This branch runs once when entering coverage or moving directly to a
         -- different surveillance source, rather than on every update cycle.
-        play_satellite_coverage_alert()
+        CampaignHelpers.play_satellite_coverage_alert()
         set_satellite_alert(
             "SATELLITE COVERAGE AREA",
             coverage.class .. " surveillance near " .. coverage.icao
@@ -2074,7 +2081,7 @@ local function refresh_airport_suggestions()
                 )
 
             local distance_nm =
-                kilometres_to_nautical_miles(
+                CampaignHelpers.kilometres_to_nautical_miles(
                     distance_km
                 )
 
@@ -2124,7 +2131,7 @@ local function refresh_airport_suggestions()
         local record = get_or_create_airport_fuel(
             airport.icao, airport.runway_length_metres)
         airport.available_fuel = record ~= nil
-            and safe_number(record.fuel_kg, 0) or 0
+            and CampaignHelpers.safe_number(record.fuel_kg, 0) or 0
         airport.size_class = record ~= nil
             and record.size_class or "UNKNOWN"
     end
@@ -2147,15 +2154,15 @@ local function get_total_fuel()
         total_fuel =
             total_fuel
             +
-            number_or_zero(xoof_fuel_tanks[tank])
+            CampaignHelpers.number_or_zero(xoof_fuel_tanks[tank])
     end
 
     return total_fuel
 end
 
 local function get_aircraft_remaining_fuel_capacity_kg()
-    local capacity_lb = safe_number(xoof_aircraft_fuel_capacity_lb, nil)
-    local current_fuel = math.max(0, safe_number(get_total_fuel(), 0))
+    local capacity_lb = CampaignHelpers.safe_number(xoof_aircraft_fuel_capacity_lb, nil)
+    local current_fuel = math.max(0, CampaignHelpers.safe_number(get_total_fuel(), 0))
 
     if capacity_lb == nil or capacity_lb <= 0 then
         logMsg("[X2030 FUEL] Aircraft fuel capacity unavailable")
@@ -2167,7 +2174,7 @@ local function get_aircraft_remaining_fuel_capacity_kg()
 end
 
 local function add_balanced_fuel(fuel_amount_kg)
-    if not is_number(fuel_amount_kg)
+    if not CampaignHelpers.is_number(fuel_amount_kg)
         or fuel_amount_kg < 0 then
 
         return false
@@ -2176,12 +2183,12 @@ local function add_balanced_fuel(fuel_amount_kg)
     local fuel_per_tank_kg = fuel_amount_kg / 2
 
     xoof_fuel_tanks[0] =
-        number_or_zero(xoof_fuel_tanks[0])
+        CampaignHelpers.number_or_zero(xoof_fuel_tanks[0])
         +
         fuel_per_tank_kg
 
     xoof_fuel_tanks[1] =
-        number_or_zero(xoof_fuel_tanks[1])
+        CampaignHelpers.number_or_zero(xoof_fuel_tanks[1])
         +
         fuel_per_tank_kg
 
@@ -2197,16 +2204,16 @@ local function transfer_airport_fuel_to_aircraft(airport_icao, requested_fuel_kg
 
     touch_airport_fuel_record(airport_icao)
     local airport_fuel_before = math.max(0,
-        safe_number(record.fuel_kg, 0))
+        CampaignHelpers.safe_number(record.fuel_kg, 0))
     local remaining_capacity = get_aircraft_remaining_fuel_capacity_kg()
 
     if remaining_capacity == nil then
         return nil
     end
 
-    local requested = safe_number(requested_fuel_kg, airport_fuel_before)
+    local requested = CampaignHelpers.safe_number(requested_fuel_kg, airport_fuel_before)
     requested = math.max(0, requested)
-    local transferred = clamp(
+    local transferred = CampaignHelpers.clamp(
         math.min(requested, airport_fuel_before, remaining_capacity),
         0, remaining_capacity)
 
@@ -2248,7 +2255,7 @@ local function prepare_airport_fuel_service(airport_icao)
     end
 
     touch_airport_fuel_record(airport_icao)
-    local available_fuel = math.max(0, safe_number(record.fuel_kg, 0))
+    local available_fuel = math.max(0, CampaignHelpers.safe_number(record.fuel_kg, 0))
     pending_fuel_service = {
         icao = airport_icao
     }
@@ -2279,13 +2286,13 @@ local function maximum_selectable_fuel_kg()
     end
 
     return math.max(0, math.min(
-        safe_number(record.fuel_kg, 0), remaining_capacity))
+        CampaignHelpers.safe_number(record.fuel_kg, 0), remaining_capacity))
 end
 
 local function load_selected_airport_fuel()
     local maximum_load = maximum_selectable_fuel_kg()
-    local requested_load = clamp(
-        safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+    local requested_load = CampaignHelpers.clamp(
+        CampaignHelpers.safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
     if requested_load <= 0 or pending_fuel_service == nil then
         return false
     end
@@ -2293,18 +2300,18 @@ local function load_selected_airport_fuel()
     local result = transfer_airport_fuel_to_aircraft(
         pending_fuel_service.icao, requested_load)
     if result == nil then
-        set_status("Fuel service unavailable. No fuel transferred.")
+        CampaignHelpers.set_status("Fuel service unavailable. No fuel transferred.")
         return false
     end
 
     selected_fuel_load_kg = 0
     last_fuel_transfer = result
     if save_campaign_progress() then
-        set_status(string.format(
+        CampaignHelpers.set_status(string.format(
             "Loaded %.0f kg at %s. Depot %.0f kg remaining.",
             result.transferred_kg, result.icao, result.depot_remaining_kg))
     else
-        set_status(string.format(
+        CampaignHelpers.set_status(string.format(
             "Loaded %.0f kg at %s, but campaign save failed.",
             result.transferred_kg, result.icao))
     end
@@ -2351,7 +2358,7 @@ local function get_active_campaign_leg()
         return CAMPAIGN_LEGS[TOTAL_CAMPAIGN_LEGS]
     end
 
-    local safe_leg = safe_number(campaign_leg, nil)
+    local safe_leg = CampaignHelpers.safe_number(campaign_leg, nil)
     if safe_leg == nil or safe_leg ~= math.floor(safe_leg)
         or safe_leg < 1 or safe_leg > TOTAL_CAMPAIGN_LEGS then
         return nil
@@ -2363,7 +2370,7 @@ end
 -- Advance only when the active fixed objective is reached in sequence. Landing
 -- at a future story airport early remains a normal fuel stop and grants no key.
 local function process_story_arrival(arrival_icao)
-    if campaign_completed or not is_valid_airport_identifier(arrival_icao) then
+    if campaign_completed or not CampaignHelpers.is_valid_airport_identifier(arrival_icao) then
         return nil
     end
 
@@ -2375,7 +2382,7 @@ local function process_story_arrival(arrival_icao)
     if active_leg.key_number ~= nil then
         alignment_keys_recovered = math.max(
             alignment_keys_recovered,
-            clamp(active_leg.key_number, 1, TOTAL_ALIGNMENT_KEYS))
+            CampaignHelpers.clamp(active_leg.key_number, 1, TOTAL_ALIGNMENT_KEYS))
     end
 
     if active_leg.assembles_protocol then
@@ -2396,7 +2403,7 @@ local function process_story_arrival(arrival_icao)
             return latest_story_event
         end
         campaign_completed = true
-        play_optional_campaign_message(
+        CampaignHelpers.play_optional_campaign_message(
             half_moon_bay_message_sound, "Half Moon Bay message")
     else
         campaign_leg = math.min(TOTAL_CAMPAIGN_LEGS, campaign_leg + 1)
@@ -2449,7 +2456,7 @@ end
 -- logout completed safely.
 local function return_to_profile_screen()
     if not save_campaign_progress() then
-        set_status("Could not save profile. Logout cancelled.")
+        CampaignHelpers.set_status("Could not save profile. Logout cancelled.")
         return false
     end
 
@@ -2473,13 +2480,13 @@ local function validate_new_profile()
             "Enter a name of 2-32 letters, numbers, spaces, hyphens or apostrophes."
     end
 
-    if not is_required_campaign_aircraft_loaded() then
-        return nil, aircraft_requirement_message()
+    if not CampaignHelpers.is_required_campaign_aircraft_loaded() then
+        return nil, CampaignHelpers.aircraft_requirement_message()
     end
 
     update_nearest_airport()
     if nearest_airport ~= CAMPAIGN_START_AIRPORT_ICAO
-        or not is_number(nearest_airport_distance_km)
+        or not CampaignHelpers.is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
         return nil,
             "Load the Cirrus Vision SF50 at NZMO - Manapouri / Te Anau "
@@ -2539,8 +2546,8 @@ local function create_new_profile()
     profile_screen_active = false
     overwrite_confirmation_active = false
     refresh_airport_suggestions()
-    set_status("Starting airport: NZMO. Select your next hop.")
-    play_optional_campaign_message(
+    CampaignHelpers.set_status("Starting airport: NZMO. Select your next hop.")
+    CampaignHelpers.play_optional_campaign_message(
         manapouri_message_sound, "Manapouri bunker message")
     return true
 end
@@ -2569,14 +2576,14 @@ local function load_existing_profile()
         return false
     end
 
-    if not is_required_campaign_aircraft_loaded() then
-        profile_status_message = aircraft_requirement_message()
+    if not CampaignHelpers.is_required_campaign_aircraft_loaded() then
+        profile_status_message = CampaignHelpers.aircraft_requirement_message()
         return false
     end
 
     update_nearest_airport()
     if nearest_airport ~= available_saved_campaign.current_airport
-        or not is_number(nearest_airport_distance_km)
+        or not CampaignHelpers.is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km > MAX_AIRPORT_DISTANCE_KM then
         profile_status_message = "Load the Cirrus Vision SF50 at "
             .. available_saved_campaign.current_airport
@@ -2610,7 +2617,7 @@ local function load_existing_profile()
         departure_airport, get_longest_runway_metres(departure_airport))
     profile_screen_active = false
     refresh_airport_suggestions()
-    set_status("Campaign resumed at " .. departure_airport
+    CampaignHelpers.set_status("Campaign resumed at " .. departure_airport
         .. ". Select your next hop.")
     return true
 end
@@ -2626,7 +2633,7 @@ function xoof_update()
 
     -- Aircraft changes normally reload FlyWithLua scripts, but retain this guard
     -- so a mid-session change can never save fuel or advance the SF50 campaign.
-    if not is_required_campaign_aircraft_loaded() then
+    if not CampaignHelpers.is_required_campaign_aircraft_loaded() then
         suggested_airports = {}
         reset_satellite_tracking(true)
         return
@@ -2662,13 +2669,13 @@ function xoof_update()
             -- diversion information at the moment it is needed most.
 
             if departure_airport ~= nil then
-                set_status(
+                CampaignHelpers.set_status(
                     "Departed "
                     .. departure_airport
                     .. ". Reach another airport."
                 )
             else
-                set_status(
+                CampaignHelpers.set_status(
                     "Aircraft airborne. "
                     .. "Reach an airport."
                 )
@@ -2709,7 +2716,7 @@ function xoof_update()
     update_nearest_airport()
 
     if nearest_airport == nil then
-        set_status(
+        CampaignHelpers.set_status(
             "No recognised airport nearby. "
             .. "No fuel delivered."
         )
@@ -2717,11 +2724,11 @@ function xoof_update()
         return
     end
 
-    if not is_number(nearest_airport_distance_km)
+    if not CampaignHelpers.is_number(nearest_airport_distance_km)
         or nearest_airport_distance_km
             > MAX_AIRPORT_DISTANCE_KM then
 
-        set_status(
+        CampaignHelpers.set_status(
             "Airport distance unavailable. No fuel delivered."
         )
 
@@ -2755,7 +2762,7 @@ function xoof_update()
         local active_leg = get_active_campaign_leg()
         if active_leg == nil
             or active_leg.destination_icao ~= arrival_airport then
-            set_status(
+            CampaignHelpers.set_status(
                 "Airport depot or aircraft capacity unavailable. No fuel delivered."
             )
             return
@@ -2783,38 +2790,38 @@ function xoof_update()
     if save_campaign_progress() then
         if story_event ~= nil then
             if transfer_result.fuel_data_unavailable then
-                set_status(story_event .. " Fuel service unavailable; progress saved.")
+                CampaignHelpers.set_status(story_event .. " Fuel service unavailable; progress saved.")
             elseif transfer_result.resistance_service then
-                set_status(story_event .. " Resistance tanks filled the SF50.")
+                CampaignHelpers.set_status(story_event .. " Resistance tanks filled the SF50.")
             elseif transfer_result.awaiting_manual_service then
-                set_status(story_event .. " Fuel service ready on the FUEL page.")
+                CampaignHelpers.set_status(story_event .. " Fuel service ready on the FUEL page.")
             else
-                set_status(story_event .. " Progress saved.")
+                CampaignHelpers.set_status(story_event .. " Progress saved.")
             end
         elseif transfer_result.resistance_service then
-            set_status(string.format(
+            CampaignHelpers.set_status(string.format(
                 "Resistance service at %s. SF50 filled to %.0f kg.",
                 arrival_airport, transfer_result.aircraft_total_kg))
         elseif transfer_result.return_without_service then
-            set_status("Returned to " .. arrival_airport
+            CampaignHelpers.set_status("Returned to " .. arrival_airport
                 .. ". This airport has no new fuel.")
         elseif transfer_result.depot_before_kg <= 0 then
-            set_status("Arrived " .. arrival_airport
+            CampaignHelpers.set_status("Arrived " .. arrival_airport
                 .. ". DEPOT DEPLETED. NO TRANSFER AVAILABLE.")
         elseif transfer_result.aircraft_full then
-            set_status("Arrived " .. arrival_airport
+            CampaignHelpers.set_status("Arrived " .. arrival_airport
                 .. ". Aircraft tanks full. Depot unchanged.")
         elseif transfer_result.awaiting_manual_service then
-            set_status("Arrived " .. arrival_airport
+            CampaignHelpers.set_status("Arrived " .. arrival_airport
                 .. ". Select the required load on the FUEL page.")
         else
-            set_status(string.format(
+            CampaignHelpers.set_status(string.format(
                 "Arrived %s. Transferred %.0f kg; depot %.0f kg. Progress saved.",
                 arrival_airport, transfer_result.transferred_kg,
                 transfer_result.depot_remaining_kg))
         end
     else
-        set_status(
+        CampaignHelpers.set_status(
             "Arrived "
             .. arrival_airport
             .. ". Campaign save failed; fuel state may not be preserved."
@@ -2861,11 +2868,11 @@ function FuelBurnMonitor.reset()
 end
 
 function FuelBurnMonitor.update()
-    local current_time = safe_number(xoof_sim_running_time, nil)
-    local groundspeed = safe_number(xoof_groundspeed, nil)
-    local fuel_flow = safe_number(xoof_engine_fuel_flow[0], nil)
+    local current_time = CampaignHelpers.safe_number(xoof_sim_running_time, nil)
+    local groundspeed = CampaignHelpers.safe_number(xoof_groundspeed, nil)
+    local fuel_flow = CampaignHelpers.safe_number(xoof_engine_fuel_flow[0], nil)
     local valid_flight = campaign_started
-        and is_required_campaign_aircraft_loaded()
+        and CampaignHelpers.is_required_campaign_aircraft_loaded()
         and xoof_sim_paused == 0
         and xoof_on_ground == 0
         and xoof_engine_running[0] == 1
@@ -2914,7 +2921,7 @@ function FuelBurnMonitor.update()
 end
 
 function MissionComputer.current_satellite_status()
-    if not is_required_campaign_aircraft_loaded() then
+    if not CampaignHelpers.is_required_campaign_aircraft_loaded() then
         return "SATELLITE SURVEILLANCE: STANDBY",
             "Load the Cirrus Vision SF50 to initialise coverage estimates.",
             "UNAVAILABLE"
@@ -2937,7 +2944,7 @@ function MissionComputer.current_satellite_status()
     if coverage ~= nil then
         local boundary_nm = math.max(
             0,
-            safe_number(coverage.boundary_distance_nm, 0)
+            CampaignHelpers.safe_number(coverage.boundary_distance_nm, 0)
         )
 
         if not aircraft_is_above_satellite_masking_altitude() then
@@ -2964,7 +2971,7 @@ function MissionComputer.current_satellite_status()
     if nearest ~= nil then
         local boundary_nm = math.max(
             0,
-            safe_number(nearest.boundary_distance_nm, 0)
+            CampaignHelpers.safe_number(nearest.boundary_distance_nm, 0)
         )
         local severity = boundary_nm <= SATELLITE_NEAR_COVERAGE_NM
             and "CAUTION" or "INFORMATION"
@@ -3008,9 +3015,9 @@ end
 function MissionComputer.mission_computer_colored_text(value, red, green, blue)
     if imgui ~= nil and type(imgui.TextColored) == "function" then
         imgui.TextColored(
-            safe_number(red, 1.0),
-            safe_number(green, 1.0),
-            safe_number(blue, 1.0),
+            CampaignHelpers.safe_number(red, 1.0),
+            CampaignHelpers.safe_number(green, 1.0),
+            CampaignHelpers.safe_number(blue, 1.0),
             1.0,
             tostring(value or "")
         )
@@ -3197,9 +3204,9 @@ function MissionComputer.build_mission_page()
         .. tostring(TOTAL_ALIGNMENT_KEYS))
     MissionComputer.mission_computer_text("LATEST: " .. tostring(latest_story_event))
     MissionComputer.mission_computer_text(
-        is_required_campaign_aircraft_loaded()
+        CampaignHelpers.is_required_campaign_aircraft_loaded()
             and status_message
-            or aircraft_requirement_message()
+            or CampaignHelpers.aircraft_requirement_message()
     )
     MissionComputer.mission_computer_text(
         "CURRENT AIRPORT: " .. tostring(departure_airport or "UNCONFIRMED")
@@ -3216,8 +3223,8 @@ function MissionComputer.build_fuel_status()
     MissionComputer.mission_computer_text(string.format(
         "TOTAL %.0f KG | LEFT %.0f KG | RIGHT %.0f KG",
         get_total_fuel(),
-        number_or_zero(xoof_fuel_tanks[0]),
-        number_or_zero(xoof_fuel_tanks[1])
+        CampaignHelpers.number_or_zero(xoof_fuel_tanks[0]),
+        CampaignHelpers.number_or_zero(xoof_fuel_tanks[1])
     ))
     if FuelBurnMonitor.recent_kg_per_nm ~= nil then
         MissionComputer.mission_computer_text(string.format(
@@ -3240,9 +3247,9 @@ function MissionComputer.build_fuel_status()
         local service_record = get_airport_fuel_record(
             pending_fuel_service.icao)
         local depot_available = service_record ~= nil
-            and math.max(0, safe_number(service_record.fuel_kg, 0)) or 0
-        selected_fuel_load_kg = clamp(
-            safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
+            and math.max(0, CampaignHelpers.safe_number(service_record.fuel_kg, 0)) or 0
+        selected_fuel_load_kg = CampaignHelpers.clamp(
+            CampaignHelpers.safe_number(selected_fuel_load_kg, 0), 0, maximum_load)
 
         MissionComputer.mission_computer_text("")
         MissionComputer.mission_computer_separator()
@@ -3298,7 +3305,7 @@ function MissionComputer.build_fuel_status()
             MissionComputer.mission_computer_text(string.format(
                 "RESISTANCE SERVICE %s | TRANSFERRED %.0f KG",
                 tostring(last_fuel_transfer.icao or "UNKNOWN"),
-                number_or_zero(last_fuel_transfer.transferred_kg)))
+                CampaignHelpers.number_or_zero(last_fuel_transfer.transferred_kg)))
             MissionComputer.mission_computer_text(
                 "UNLIMITED SAFE-HAVEN SUPPLY | AIRCRAFT TANKS FULL")
             return
@@ -3330,7 +3337,7 @@ MissionComputer.satellite_test_status =
     "Test controls require the airborne SF50 above 1,000 ft AGL."
 
 function MissionComputer.satellite_test_eligibility()
-    if not is_required_campaign_aircraft_loaded() then
+    if not CampaignHelpers.is_required_campaign_aircraft_loaded() then
         return false, "Load the Cirrus Vision SF50 before testing."
     end
 
@@ -3493,20 +3500,20 @@ function MissionComputer.build_satellite_page()
 
     MissionComputer.mission_computer_text(string.format(
         "Acquisition chance: %.0f%% per check | Checks: %d",
-        math.max(0, safe_number(satellite_acquisition_chance, 0)) * 100,
-        math.max(0, safe_number(satellite_acquisition_check_count, 0))
+        math.max(0, CampaignHelpers.safe_number(satellite_acquisition_chance, 0)) * 100,
+        math.max(0, CampaignHelpers.safe_number(satellite_acquisition_check_count, 0))
     ))
     MissionComputer.mission_computer_text(string.format(
         "Hit chance after lock: %.0f%%",
-        math.max(0, safe_number(satellite_hit_chance, 0)) * 100
+        math.max(0, CampaignHelpers.safe_number(satellite_hit_chance, 0)) * 100
     ))
 
     if satellite_next_event_time ~= nil then
         local remaining_seconds = math.max(
             0,
             math.ceil(
-                safe_number(satellite_next_event_time, satellite_event_time)
-                    - safe_number(satellite_event_time, 0)
+                CampaignHelpers.safe_number(satellite_next_event_time, satellite_event_time)
+                    - CampaignHelpers.safe_number(satellite_event_time, 0)
             )
         )
         local deadline_label = "Next event"
@@ -3616,7 +3623,7 @@ function MissionComputer.build_hops_page()
             local affordability
             local runway_length_text = "RWY UNKNOWN"
 
-            if is_number(
+            if CampaignHelpers.is_number(
                 airport.runway_length_metres
             ) then
 
@@ -3626,7 +3633,7 @@ function MissionComputer.build_hops_page()
                 )
             end
 
-            if not is_number(airport.required_fuel) then
+            if not CampaignHelpers.is_number(airport.required_fuel) then
                 affordability = "UNKNOWN"
             elseif get_total_fuel()
                 >=
@@ -3639,29 +3646,29 @@ function MissionComputer.build_hops_page()
 
             local reserve_description = ""
             if airport.size_class == "MAJOR"
-                and number_or_zero(airport.available_fuel) < 55 then
+                and CampaignHelpers.number_or_zero(airport.available_fuel) < 55 then
                 reserve_description = " | LONG RUNWAY / LOW RESERVE"
             elseif airport.size_class == "TINY"
-                and number_or_zero(airport.available_fuel) >= 180 then
+                and CampaignHelpers.number_or_zero(airport.available_fuel) >= 180 then
                 reserve_description = " | SHORT RUNWAY / HIGH RESERVE"
             end
 
             local depot_fuel = math.max(
                 0,
-                number_or_zero(airport.available_fuel)
+                CampaignHelpers.number_or_zero(airport.available_fuel)
             )
 
             MissionComputer.mission_computer_text(string.format(
                 "%d. %s | %.0f NM | HDG %03.0f | %s",
                 index,
                 tostring(airport.icao or "UNKNOWN"),
-                number_or_zero(airport.distance_nm),
-                number_or_zero(airport.heading),
+                CampaignHelpers.number_or_zero(airport.distance_nm),
+                CampaignHelpers.number_or_zero(airport.heading),
                 affordability
             ))
             MissionComputer.mission_computer_text(string.format(
                 "   EST %.0f KG | %s | DEPOT %.0f KG%s",
-                number_or_zero(airport.required_fuel),
+                CampaignHelpers.number_or_zero(airport.required_fuel),
                 runway_length_text,
                 depot_fuel,
                 reserve_description
@@ -3744,7 +3751,7 @@ function xoof_build_mission_computer_window()
             local saved_fuel_total = 0
             for tank = 0, 1 do
                 saved_fuel_total = saved_fuel_total
-                    + number_or_zero(available_saved_campaign.fuel_tanks[tank])
+                    + CampaignHelpers.number_or_zero(available_saved_campaign.fuel_tanks[tank])
             end
             MissionComputer.mission_computer_text("PILOT: "
                 .. tostring(available_saved_campaign.pilot_name))
@@ -3913,7 +3920,7 @@ function MissionComputer.create_mission_computer_window()
 end
 
 function xoof_save_before_exit()
-    if is_required_campaign_aircraft_loaded() then
+    if CampaignHelpers.is_required_campaign_aircraft_loaded() then
         save_campaign_progress()
     end
 end
@@ -3926,13 +3933,13 @@ do_often("xoof_update()")
 do_every_frame("X2030Impact.update()")
 do_on_exit("xoof_save_before_exit()")
 
-load_campaign_sounds()
+CampaignHelpers.load_campaign_sounds()
 MissionComputer.create_mission_computer_window()
 
 if load_valid_land_airports() then
     inspect_available_profile()
 else
-    set_status(
+    CampaignHelpers.set_status(
         "Airport database failed to load. "
         .. "Check X-Plane Log.txt."
     )
