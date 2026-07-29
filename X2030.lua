@@ -249,6 +249,14 @@ local HALF_MOON_BAY_MESSAGE_PATH =
     SCRIPT_DIRECTORY .. "Sounds" .. DIRECTORY_SEPARATOR
     .. "half_moon_bay_message.wav"
 
+-- First mission-imagery test: keep the asset beside the script and load it
+-- through the owning floating window. Later legs can reuse this small,
+-- guarded path once the FlyWithLua texture behaviour is confirmed in X-Plane.
+local MANAPOURI_BRIEFING_IMAGE_PATH =
+    SCRIPT_DIRECTORY .. "images" .. DIRECTORY_SEPARATOR .. "Manapouri.png"
+local MISSION_IMAGE_DISPLAY_WIDTH = 600
+local MISSION_IMAGE_DISPLAY_HEIGHT = 400
+
 -- Approximate flight-planning assumptions
 local ESTIMATED_AVERAGE_SPEED_KT = 180
 local ESTIMATED_FUEL_FLOW_KG_PER_MIN = 2.5
@@ -420,6 +428,8 @@ local pending_fuel_service = nil
 local selected_fuel_load_kg = 0
 local active_display_page = DISPLAY_PAGE_MISSION
 local display_tab_window = nil
+local manapouri_briefing_image = nil
+local manapouri_briefing_image_status = "NOT LOADED"
 
 -- Satellite event time advances only while the simulator is not paused. This
 -- prevents a tracking countdown expiring while the player is in a menu.
@@ -1004,7 +1014,6 @@ local function save_campaign_progress()
 
         return false
     end
-
 
     local saved_tanks = {}
     for tank = 0, 1 do
@@ -3041,6 +3050,30 @@ function MissionComputer.mission_computer_separator()
     end
 end
 
+-- Image rendering is deliberately optional. Mission text must remain usable
+-- if an older FlyWithLua build lacks image support or the PNG cannot be loaded.
+function MissionComputer.build_manapouri_briefing_image()
+    if manapouri_briefing_image ~= nil
+        and imgui ~= nil
+        and type(imgui.Image) == "function" then
+        imgui.Image(
+            manapouri_briefing_image,
+            MISSION_IMAGE_DISPLAY_WIDTH,
+            MISSION_IMAGE_DISPLAY_HEIGHT
+        )
+        MissionComputer.mission_computer_text(
+            "OBJECTIVE IMAGERY // NZMO MANAPOURI BUNKER"
+        )
+        MissionComputer.mission_computer_separator()
+        return
+    end
+
+    MissionComputer.mission_computer_text(
+        "OBJECTIVE IMAGERY UNAVAILABLE // " .. manapouri_briefing_image_status
+    )
+    MissionComputer.mission_computer_separator()
+end
+
 function MissionComputer.mission_emergency_text(value)
     local resolved_text = tostring(value or "")
     if imgui ~= nil and type(imgui.TextColored) == "function" then
@@ -3091,6 +3124,7 @@ end
 function MissionComputer.build_opening_briefing_page()
     MissionComputer.mission_computer_text("CAMPAIGN OPENING BRIEFING // 06 JAN 2030")
     MissionComputer.mission_computer_separator()
+    MissionComputer.build_manapouri_briefing_image()
 
     for _, briefing_line in ipairs(OPENING_BRIEFING_LINES) do
         MissionComputer.mission_computer_text(briefing_line)
@@ -3525,26 +3559,27 @@ function MissionComputer.build_satellite_page()
 
     MissionComputer.mission_computer_text("")
     MissionComputer.mission_computer_separator()
-    MissionComputer.mission_computer_text("TEST CONTROLS")
+    MissionComputer.mission_computer_text("MANUAL STRIKE TEST")
+    MissionComputer.mission_computer_colored_text(
+        "CAUTION: Immediately applies SF50 electrical failures and engine fire.",
+        1.0, 0.28, 0.20
+    )
     MissionComputer.mission_computer_text(
-        "TEST IMPULSE applies motion only. TEST FIRE also applies failures and fire."
+        "Coverage, masking, acquisition, lock, probability and cooldown are bypassed."
     )
 
-    if imgui ~= nil and type(imgui.Button) == "function" then
-        if imgui.Button("TEST IMPULSE", 190, 30) then
-            MissionComputer.test_satellite_impulse()
-        end
-        if type(imgui.SameLine) == "function" then
-            imgui.SameLine()
-        end
-        if imgui.Button("TEST FIRE", 190, 30) then
-            MissionComputer.test_satellite_full_hit()
-        end
+    if imgui.Button("TEST FIRE", 190, 30) then
+        -- Exercise the production strike path directly. Do not change the
+        -- surveillance state or fabricate telemetry rolls: this control
+        -- deliberately bypasses every normal eligibility and probability check.
+        apply_satellite_electrical_fire_damage()
+        set_satellite_alert(
+            "DIRECTED-ENERGY STRIKE - TEST HIT",
+            "Manual test fire applied; surveillance checks were bypassed.",
+            SATELLITE_STRIKE_MESSAGE_SECONDS,
+            "DANGER"
+        )
     end
-
-    MissionComputer.mission_computer_text(
-        tostring(MissionComputer.satellite_test_status)
-    )
 end
 
 function MissionComputer.build_hops_page()
@@ -3835,6 +3870,31 @@ function MissionComputer.create_mission_computer_window()
     if display_tab_window == nil then
         logMsg("[X2030] Mission computer unavailable: window creation failed")
         return
+    end
+
+    -- float_wnd_load_image associates the texture with this window. Check the
+    -- file and API first so missing imagery never interrupts campaign startup.
+    local image_file = io.open(MANAPOURI_BRIEFING_IMAGE_PATH, "rb")
+    if image_file == nil then
+        manapouri_briefing_image_status = "FILE MISSING"
+        logMsg("[X2030] Manapouri briefing image unavailable: file missing")
+    else
+        image_file:close()
+        if type(float_wnd_load_image) ~= "function" then
+            manapouri_briefing_image_status = "IMAGE API MISSING"
+            logMsg("[X2030] Manapouri briefing image unavailable: image API missing")
+        else
+            manapouri_briefing_image = float_wnd_load_image(
+                display_tab_window,
+                MANAPOURI_BRIEFING_IMAGE_PATH
+            )
+            if manapouri_briefing_image == nil then
+                manapouri_briefing_image_status = "LOAD FAILED"
+                logMsg("[X2030] Manapouri briefing image failed to load")
+            else
+                manapouri_briefing_image_status = "READY"
+            end
+        end
     end
 
     float_wnd_set_title(display_tab_window, "X2030 Mission Computer")
