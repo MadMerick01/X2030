@@ -8,12 +8,12 @@
    `Scripts` folder. Preserve these folder names; the Lua script builds
    platform-correct paths with FlyWithLua's directory separator.
 
-   > **Temporary physical-impact restriction:** Do not install
-   > `X2030_Impact.lua` in the FlyWithLua `Scripts` directory. Simulator testing
-   > has isolated a three-monitor cockpit-input conflict to that helper. The
-   > main campaign has a guarded no-op fallback and remains operational without
-   > it; satellite electrical and engine-fire damage still applies, but the
-   > supplementary physical impulse is unavailable. See
+   > **Physical-impact restriction:** Remove any earlier `X2030_Impact.lua` or
+   > `X2030_Downward_Impact.lua` from the FlyWithLua `Scripts` directory.
+   > Three-monitor simulator testing confirmed that even the downward-only
+   > helper prevents centre-monitor cockpit manipulators from receiving clicks.
+   > Physical motion is therefore disabled; satellite electrical and engine-fire
+   > damage remains active. See
    > [`X2030_Impact_investigation.md`](X2030_Impact_investigation.md) for the
    > evidence and later test plan.
 

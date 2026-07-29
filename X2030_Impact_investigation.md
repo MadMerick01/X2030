@@ -1,6 +1,6 @@
 # X2030 physical-impact module investigation
 
-**Status:** Physical impact disabled pending further simulator testing  
+**Status:** Physical impact removed after the reduced test reproduced the fault
 **Recorded:** 29 July 2026
 
 ## Summary
@@ -19,6 +19,7 @@ The following simulator tests isolated the behaviour:
 | `X2030.lua` and `X2030_Impact.lua` | Not working |
 | `X2030_Impact.lua` only | Not working |
 | `X2030.lua` only | Working |
+| `X2030.lua` and `X2030_Downward_Impact.lua` | Not working |
 
 Renaming the high-resolution `images/Manapouri.png` asset and closing the
 visible mission-computer window did not restore the centre-monitor cockpit
@@ -29,6 +30,12 @@ The supplied X-Plane log reported that both Lua files loaded successfully. It
 did not contain an `[X2030 IMPACT]` event, an X2030 satellite-damage event, or a
 Lua quarantine failure. This indicates that the problem occurs when the impact
 module is initialised, not because an impact is deliberately fired at startup.
+
+The later downward-only variant removed all lateral-force and moment bindings,
+but centre-monitor cockpit clicks still failed. Removing that variant restored
+the clicks. This narrows the reproducer to a helper whose only writable physics
+integration is `sim/flightmodel/forces/fnrml_plug_acf`; changing the direction
+or simplifying the impulse did not resolve the input conflict.
 
 ## Current technical finding
 
@@ -53,28 +60,21 @@ accumulators, or X-Plane's multi-monitor input handling has not yet been
 distinguished. Do not assume that the X-Plane dataref names themselves are
 invalid; they are present and writable in the project's X-Plane 12 reference.
 
-## Recommended action now
+## Implemented resolution
 
-Do not distribute or install `X2030_Impact.lua` until the isolated simulator
-tests below have been completed. Run the campaign with `X2030.lua` only. This
+Do not distribute or install `X2030_Impact.lua` or
+`X2030_Downward_Impact.lua`. Run the campaign with `X2030.lua` only. This
 preserves campaign progression, the mission computer, satellite surveillance,
 audio handling, and satellite electrical-bus/engine-fire damage while omitting
 only the supplementary physical force impulse.
 
-This configuration is intentionally safe. `X2030.lua` loads the helper with a
-protected `dofile` call. If the helper is missing or invalid, it installs a
-no-op `X2030Impact` interface containing `start`, `update`, `cancel`, and
-`is_active`. The existing frame callback can consequently call
-`X2030Impact.update()` without encountering a nil table or missing function.
-The main damage function also treats the physical impulse as supplementary;
-electrical-bus failures and the engine fire remain authoritative if the
-impulse cannot start.
+The campaign no longer loads either helper, registers its per-frame update, or
+offers the physics-only test button. The full-hit test and normal satellite hit
+continue to apply impact audio, electrical-bus failures and the engine fire.
+The two unsafe helper files have been removed from the project so they cannot be
+accidentally copied into FlyWithLua's automatically scanned `Scripts` folder.
 
-An expected log message will state that `X2030_Impact.lua` could not be loaded.
-For this temporary configuration, that message confirms that the guarded
-fallback is active and is not a campaign-stopping error.
-
-## Later test plan
+## Historical test plan
 
 Use temporary diagnostic variants of the impact module and change only one
 dataref group at a time. After every test, fully restart X-Plane rather than
@@ -118,14 +118,13 @@ plugins, and exact files in FlyWithLua's `Scripts` directory with each result.
 
 ## Criteria for re-enabling physical impacts
 
-Do not restore `X2030_Impact.lua` to the normal installation instructions until
+Do not restore either impact helper to the normal installation instructions until
 all of the following are true:
 
 - centre-monitor SF50 cockpit manipulators remain interactive after startup;
 - interaction remains correct after a FlyWithLua reload;
 - the result is repeatable with the three-monitor configuration;
-- the physical impulse occurs only after an automatic hit or guarded test;
+- any replacement motion effect occurs only after an automatic hit or guarded test;
 - no force or moment remains active after its short pulse;
 - the campaign continues safely when the helper is absent; and
 - FlyWithLua reports no script quarantine or runtime error.
-
