@@ -4,9 +4,18 @@
 
 1. Download the latest release file.
 2. Extract the downloaded archive.
-3. Copy `X2030.lua`, `X2030_Impact.lua`, and the `Sounds` and `images` folders
-   into the FlyWithLua `Scripts` folder. Preserve these folder names; the Lua
-   script builds platform-correct paths with FlyWithLua's directory separator:
+3. Copy `X2030.lua` and the `Sounds` and `images` folders into the FlyWithLua
+   `Scripts` folder. Preserve these folder names; the Lua script builds
+   platform-correct paths with FlyWithLua's directory separator.
+
+   > **Temporary physical-impact restriction:** Do not install
+   > `X2030_Impact.lua` in the FlyWithLua `Scripts` directory. Simulator testing
+   > has isolated a three-monitor cockpit-input conflict to that helper. The
+   > main campaign has a guarded no-op fallback and remains operational without
+   > it; satellite electrical and engine-fire damage still applies, but the
+   > supplementary physical impulse is unavailable. See
+   > [`X2030_Impact_investigation.md`](X2030_Impact_investigation.md) for the
+   > evidence and later test plan.
 
 ```text
 X-Plane 12/
@@ -15,7 +24,6 @@ X-Plane 12/
         └── FlyWithLua/
             └── Scripts/
                 ├── X2030.lua
-                ├── X2030_Impact.lua
                 ├── Sounds/
                 │   ├── Satallite_coverage_alert.wav
                 │   └── laser_hit1.wav
