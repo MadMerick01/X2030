@@ -2,38 +2,6 @@
 -- Prototype 0.9
 -- Airport fuel, next-hop suggestions and satellite surveillance
 
--- Load the separately compiled physics module before campaign callbacks are
--- registered. Keeping its numerous constants and helpers out of this already
--- large chunk avoids Lua's per-function local-variable ceiling.
-function x2030_load_impact_module()
-    local loaded_ok, load_result = pcall(
-        dofile,
-        SCRIPT_DIRECTORY .. "X2030_Downward_Impact.lua"
-    )
-
-    if loaded_ok and type(load_result) == "table" then
-        X2030Impact = load_result
-        return
-    end
-
-    -- Keep the rest of the campaign operational when the separately packaged
-    -- module is absent or invalid. The no-op interface also keeps the frame
-    -- callback safe and makes the installation fault explicit in Log.txt.
-    logMsg(
-        "[X2030 IMPACT] Could not load X2030_Downward_Impact.lua: "
-            .. tostring(load_result)
-    )
-    X2030Impact = {
-        start = function() return false end,
-        update = function() end,
-        cancel = function() end,
-        is_active = function() return false end
-    }
-end
-
-x2030_load_impact_module()
-x2030_load_impact_module = nil
-
 local PLUGIN_NAME = "X2030"
 local CAMPAIGN_SUBTITLE = "THE ALIGNMENT PROTOCOL"
 local TOTAL_CAMPAIGN_LEGS = 11
@@ -1879,30 +1847,17 @@ end
 -- immediately after this call prevents the frequently-running update callback
 -- from repeatedly writing failures or replaying the impact sound.
 local function apply_satellite_electrical_fire_damage()
-    local physical_impulse_applied = false
     xoof_failure_bus_1 = XPLANE_FAILURE_INOPERATIVE
     xoof_failure_bus_2 = XPLANE_FAILURE_INOPERATIVE
     xoof_failure_engine_1_fire = XPLANE_FAILURE_INOPERATIVE
     satellite_electrical_fire_damage_active = true
     CampaignHelpers.play_satellite_hit_sound()
 
-    -- Damage remains authoritative even if an incomplete FlyWithLua install
-    -- cannot run the supplementary physical impulse.
-    if type(X2030Impact) == "table"
-        and type(X2030Impact.start) == "function" then
-        local impact_started_ok, impact_started = pcall(X2030Impact.start)
-        if not impact_started_ok or not impact_started then
-            logMsg("[X2030 IMPACT] Physical strike impulse unavailable.")
-        else
-            physical_impulse_applied = true
-        end
-    end
-
     logMsg(
         "[X2030 SATELLITE] Damage applied: electrical buses 1 and 2 "
             .. "inoperative; engine 1 fire."
     )
-    return true, physical_impulse_applied
+    return true
 end
 
 local function update_satellite_surveillance()
@@ -3419,45 +3374,8 @@ function MissionComputer.satellite_test_eligibility()
         return false, "Climb above 1,000 ft AGL before testing."
     end
 
-    if type(X2030Impact) ~= "table"
-        or type(X2030Impact.start) ~= "function" then
-        return false, "The physical impact module is unavailable."
-    end
-
-    if type(X2030Impact.is_active) == "function" then
-        local active_check_ok, impact_active = pcall(X2030Impact.is_active)
-        if not active_check_ok then
-            return false, "The physical impact module did not respond."
-        end
-        if impact_active then
-            return false, "Wait for the active impulse to finish."
-        end
-    end
-
     return true, nil
 end
-
-function MissionComputer.test_satellite_impulse()
-    local eligible, reason = MissionComputer.satellite_test_eligibility()
-    if not eligible then
-        MissionComputer.satellite_test_status = reason
-        return false
-    end
-
-    local started_ok, impulse_started = pcall(X2030Impact.start)
-    if not started_ok or not impulse_started then
-        MissionComputer.satellite_test_status =
-            "Impulse test failed. Check X-Plane Log.txt."
-        logMsg("[X2030 IMPACT] Manual impulse test could not start.")
-        return false
-    end
-
-    MissionComputer.satellite_test_status =
-        "IMPULSE FIRED // No aircraft failures applied."
-    logMsg("[X2030 IMPACT] Manual physics-only impulse test fired.")
-    return true
-end
-
 
 function MissionComputer.test_satellite_full_hit()
     local eligible, reason = MissionComputer.satellite_test_eligibility()
@@ -3466,7 +3384,7 @@ function MissionComputer.test_satellite_full_hit()
         return false
     end
 
-    local damage_ok, damage_applied, impulse_applied = pcall(
+    local damage_ok, damage_applied = pcall(
         apply_satellite_electrical_fire_damage
     )
     if not damage_ok or not damage_applied then
@@ -3480,20 +3398,15 @@ function MissionComputer.test_satellite_full_hit()
     -- deadline cannot immediately inflict a second hit during flight testing.
     set_satellite_alert(
         "TEST DIRECTED-ENERGY STRIKE - HIT",
-        "Impulse fired. Bus 1 and Bus 2 offline. Engine fire detected.",
+        "Bus 1 and Bus 2 offline. Engine fire detected.",
         SATELLITE_STRIKE_MESSAGE_SECONDS,
         "DANGER"
     )
     satellite_state = "COOLDOWN"
     satellite_next_event_time = satellite_event_time
         + SATELLITE_STRIKE_COOLDOWN_SECONDS
-    if impulse_applied then
-        MissionComputer.satellite_test_status =
-            "FULL HIT FIRED // Aircraft damage is active."
-    else
-        MissionComputer.satellite_test_status =
-            "DAMAGE APPLIED // Physical impulse unavailable; check Log.txt."
-    end
+    MissionComputer.satellite_test_status =
+        "FULL HIT FIRED // Aircraft damage is active."
     logMsg("[X2030 SATELLITE] Manual full-hit test fired.")
     return true
 end
@@ -3637,22 +3550,16 @@ function MissionComputer.build_satellite_page()
         "Available only in the airborne SF50 above 1,000 ft AGL."
     )
     MissionComputer.mission_computer_text(
-        "TEST IMPULSE applies motion only; TEST FULL HIT also plays impact audio"
+        "TEST FULL HIT plays impact audio, disables both electrical buses,"
     )
     MissionComputer.mission_computer_text(
-        "and applies both electrical-bus failures and the engine fire."
+        "and starts the engine fire. Physical motion is disabled for input safety."
     )
 
-    -- Route both buttons through their guarded test functions. Calling the
+    -- Route the button through its guarded test function. Calling the
     -- production damage function here directly would bypass the SF50, pause,
-    -- airborne, altitude and already-active-impulse checks above.
+    -- airborne and altitude checks above.
     if imgui ~= nil and type(imgui.Button) == "function" then
-        if imgui.Button("TEST IMPULSE", 190, 30) then
-            MissionComputer.test_satellite_impulse()
-        end
-        if type(imgui.SameLine) == "function" then
-            imgui.SameLine()
-        end
         if imgui.Button("TEST FULL HIT", 190, 30) then
             MissionComputer.test_satellite_full_hit()
         end
@@ -4006,7 +3913,6 @@ end
 ------------------------------------------------------------
 
 do_often("xoof_update()")
-do_every_frame("X2030Impact.update()")
 do_on_exit("xoof_save_before_exit()")
 
 CampaignHelpers.load_campaign_sounds()
