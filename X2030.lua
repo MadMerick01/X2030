@@ -3281,6 +3281,30 @@ function MissionComputer.build_satellite_page()
     else
         MissionComputer.mission_computer_text("Last hit roll: NONE")
     end
+
+    MissionComputer.mission_computer_text("")
+    MissionComputer.mission_computer_separator()
+    MissionComputer.mission_computer_text("MANUAL STRIKE TEST")
+    MissionComputer.mission_computer_colored_text(
+        "CAUTION: Immediately applies SF50 electrical failures and engine fire.",
+        1.0, 0.28, 0.20
+    )
+    MissionComputer.mission_computer_text(
+        "Coverage, masking, acquisition, lock, probability and cooldown are bypassed."
+    )
+
+    if imgui.Button("TEST FIRE", 190, 30) then
+        -- Exercise the production strike path directly. Do not change the
+        -- surveillance state or fabricate telemetry rolls: this control
+        -- deliberately bypasses every normal eligibility and probability check.
+        apply_satellite_electrical_fire_damage()
+        set_satellite_alert(
+            "DIRECTED-ENERGY STRIKE - TEST HIT",
+            "Manual test fire applied; surveillance checks were bypassed.",
+            SATELLITE_STRIKE_MESSAGE_SECONDS,
+            "DANGER"
+        )
+    end
 end
 
 function MissionComputer.build_hops_page()
