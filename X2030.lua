@@ -8,7 +8,7 @@
 function x2030_load_impact_module()
     local loaded_ok, load_result = pcall(
         dofile,
-        SCRIPT_DIRECTORY .. "X2030_Impact.lua"
+        SCRIPT_DIRECTORY .. "X2030_Downward_Impact.lua"
     )
 
     if loaded_ok and type(load_result) == "table" then
@@ -20,7 +20,7 @@ function x2030_load_impact_module()
     -- module is absent or invalid. The no-op interface also keeps the frame
     -- callback safe and makes the installation fault explicit in Log.txt.
     logMsg(
-        "[X2030 IMPACT] Could not load X2030_Impact.lua: "
+        "[X2030 IMPACT] Could not load X2030_Downward_Impact.lua: "
             .. tostring(load_result)
     )
     X2030Impact = {
