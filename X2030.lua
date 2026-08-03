@@ -3555,6 +3555,9 @@ function MissionComputer.build_satellite_page()
     MissionComputer.mission_computer_text(
         "and starts the engine fire. Physical motion is disabled for input safety."
     )
+    MissionComputer.mission_computer_text(
+        "TEST IMPACT AUDIO plays only laser_hit1.wav without flight restrictions."
+    )
 
     -- Route the button through its guarded test function. Calling the
     -- production damage function here directly would bypass the SF50, pause,
@@ -3562,6 +3565,12 @@ function MissionComputer.build_satellite_page()
     if imgui ~= nil and type(imgui.Button) == "function" then
         if imgui.Button("TEST FULL HIT", 190, 30) then
             MissionComputer.test_satellite_full_hit()
+        end
+        if type(imgui.SameLine) == "function" then imgui.SameLine() end
+        -- This is an unrestricted audio-only diagnostic. Deliberately bypass
+        -- aircraft, altitude, surveillance-state and cooldown checks.
+        if imgui.Button("TEST IMPACT AUDIO", 190, 30) then
+            CampaignHelpers.play_satellite_hit_sound()
         end
     end
 
