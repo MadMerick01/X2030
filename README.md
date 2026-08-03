@@ -45,6 +45,11 @@ campaign.
    mission computer.
 7. Follow the on-screen mission instructions.
 
+X2030 preserves the weather already loaded by X-Plane. After a campaign profile
+is activated, manually configured weather is assigned an improving or
+deteriorating trend which is reconsidered every fifteen active minutes. If live
+weather is active, X2030 leaves its evolution under X-Plane's control.
+
 
 # X2030
 
