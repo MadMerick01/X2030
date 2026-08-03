@@ -154,6 +154,25 @@ local FUEL_SAVE_INTERVAL_SECONDS = 30
 -- residual amounts are never stranded by the interface.
 local FUEL_LOADING_STEP_KG = 5
 
+-- Campaign weather begins from a weighted X-Plane preset, keeping routine
+-- flying conditions common while allowing severe weather to remain a rare
+-- survival-planning problem. X-Plane then evolves that weather in one of two
+-- plainly reported directions, reconsidered every fifteen active minutes.
+local WEATHER_TREND_INTERVAL_SECONDS = 15 * 60
+local WEATHER_PRESET_ROLLS = {
+    { maximum_roll = 12, preset = 0 }, -- Clear
+    { maximum_roll = 27, preset = 1 }, -- VFR Few
+    { maximum_roll = 43, preset = 2 }, -- VFR Scattered
+    { maximum_roll = 58, preset = 3 }, -- VFR Broken
+    { maximum_roll = 72, preset = 4 }, -- VFR Marginal
+    { maximum_roll = 83, preset = 5 }, -- IFR Non-precision
+    { maximum_roll = 91, preset = 6 }, -- IFR Precision
+    { maximum_roll = 97, preset = 7 }, -- Convective
+    { maximum_roll = 100, preset = 8 } -- Large-cell Storms
+}
+local WEATHER_CHANGE_MODE_IMPROVING = 1
+local WEATHER_CHANGE_MODE_DETERIORATING = 5
+
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
 -- Suggestions require a measurable conventional runway at least as long as the
@@ -305,6 +324,21 @@ dataref(
     "readonly"
 )
 
+-- X-Plane 12 regional weather controls. The preset is selected only when a
+-- profile becomes active; subsequent changes use X-Plane's native evolution
+-- rather than repeatedly replacing the entire atmosphere.
+dataref(
+    "xoof_weather_preset",
+    "sim/weather/region/weather_preset",
+    "writable"
+)
+
+dataref(
+    "xoof_weather_change_mode",
+    "sim/weather/region/change_mode",
+    "writable"
+)
+
 -- X-Plane publishes the configured aircraft fuel capacity in pounds.
 dataref(
     "xoof_aircraft_fuel_capacity_lb",
@@ -369,6 +403,10 @@ local profile_status_message = "Select or create a pilot profile."
 local available_saved_campaign = nil
 local available_save_error = nil
 local maintenance_status_message = nil
+
+local weather_trend_message = nil
+local weather_trend_elapsed_seconds = 0
+local weather_last_sim_time = nil
 
 local departure_airport = nil
 local nearest_airport = nil
@@ -2447,10 +2485,81 @@ local function set_initial_campaign_fuel()
 end
 
 ------------------------------------------------------------
+-- CAMPAIGN WEATHER
+------------------------------------------------------------
+
+local function choose_weighted_weather_preset()
+    local preset_roll = math.random(1, 100)
+
+    for _, preset_entry in ipairs(WEATHER_PRESET_ROLLS) do
+        if preset_roll <= preset_entry.maximum_roll then
+            return preset_entry.preset
+        end
+    end
+
+    -- The table deliberately ends at 100, but retain a safe clear-weather
+    -- fallback so a later balancing edit cannot return nil to X-Plane.
+    return 0
+end
+
+local function choose_weather_trend()
+    if math.random(1, 2) == 1 then
+        xoof_weather_change_mode = WEATHER_CHANGE_MODE_IMPROVING
+        weather_trend_message = "LOCAL WEATHER: IMPROVING"
+    else
+        xoof_weather_change_mode = WEATHER_CHANGE_MODE_DETERIORATING
+        weather_trend_message = "LOCAL WEATHER: DETERIORATING"
+    end
+end
+
+-- Weather is deliberately session-based: each successful profile activation
+-- receives a fresh preset and trend without expanding or invalidating legacy
+-- campaign saves.
+local function start_campaign_weather()
+    xoof_weather_preset = choose_weighted_weather_preset()
+    weather_trend_elapsed_seconds = 0
+    weather_last_sim_time = CampaignHelpers.safe_number(
+        xoof_sim_running_time, nil)
+    choose_weather_trend()
+end
+
+local function stop_campaign_weather_timer()
+    weather_trend_message = nil
+    weather_trend_elapsed_seconds = 0
+    weather_last_sim_time = nil
+end
+
+local function update_campaign_weather()
+    local current_time = CampaignHelpers.safe_number(xoof_sim_running_time, nil)
+    if current_time == nil then
+        weather_last_sim_time = nil
+        return
+    end
+
+    if weather_last_sim_time ~= nil and xoof_sim_paused == 0 then
+        local elapsed = current_time - weather_last_sim_time
+        if elapsed > 0 then
+            -- Prevent scenery loads or system sleep from skipping several
+            -- weather cycles while retaining normal frequent callback timing.
+            weather_trend_elapsed_seconds = weather_trend_elapsed_seconds
+                + math.min(elapsed, 5)
+        end
+    end
+
+    weather_last_sim_time = current_time
+
+    if weather_trend_elapsed_seconds >= WEATHER_TREND_INTERVAL_SECONDS then
+        weather_trend_elapsed_seconds = 0
+        choose_weather_trend()
+    end
+end
+
+------------------------------------------------------------
 -- INITIAL AIRPORT
 ------------------------------------------------------------
 
 local function inspect_available_profile()
+    stop_campaign_weather_timer()
     campaign_started = false
     departure_airport = nil
     pending_fuel_service = nil
@@ -2566,6 +2675,7 @@ local function create_new_profile()
     available_save_error = nil
     profile_screen_active = false
     overwrite_confirmation_active = false
+    start_campaign_weather()
     refresh_airport_suggestions()
     CampaignHelpers.set_status("Starting airport: NZMO. Select your next hop.")
     CampaignHelpers.play_optional_campaign_message(
@@ -2637,6 +2747,7 @@ local function load_existing_profile()
     get_or_create_airport_fuel(
         departure_airport, get_longest_runway_metres(departure_airport))
     profile_screen_active = false
+    start_campaign_weather()
     refresh_airport_suggestions()
     CampaignHelpers.set_status("Campaign resumed at " .. departure_airport
         .. ". Select your next hop.")
@@ -2666,6 +2777,8 @@ function xoof_update()
         reset_satellite_tracking(true)
         return
     end
+
+    update_campaign_weather()
 
     -- Persist simulator or plugin fuel changes in every operating state.
     save_fuel_if_changed()
@@ -3750,6 +3863,9 @@ function xoof_build_mission_computer_window()
 
     MissionComputer.mission_computer_text("PILOT: " .. tostring(pilot_name or "UNKNOWN PILOT")
         .. " | PROFILE ACTIVE")
+    if weather_trend_message ~= nil then
+        MissionComputer.mission_computer_text(weather_trend_message)
+    end
     if imgui.Button("LOG OUT", 125, 30) then
         return_to_profile_screen()
         return
