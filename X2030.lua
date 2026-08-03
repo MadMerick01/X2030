@@ -154,24 +154,14 @@ local FUEL_SAVE_INTERVAL_SECONDS = 30
 -- residual amounts are never stranded by the interface.
 local FUEL_LOADING_STEP_KG = 5
 
--- Campaign weather begins from a weighted X-Plane preset, keeping routine
--- flying conditions common while allowing severe weather to remain a rare
--- survival-planning problem. X-Plane then evolves that weather in one of two
--- plainly reported directions, reconsidered every fifteen active minutes.
+-- Preserve the weather X-Plane loaded. Once a profile is active, the campaign
+-- controls only the direction in which manual weather evolves, reconsidered
+-- every fifteen active minutes. X-Plane's live-weather mode is never replaced.
 local WEATHER_TREND_INTERVAL_SECONDS = 15 * 60
-local WEATHER_PRESET_ROLLS = {
-    { maximum_roll = 12, preset = 0 }, -- Clear
-    { maximum_roll = 27, preset = 1 }, -- VFR Few
-    { maximum_roll = 43, preset = 2 }, -- VFR Scattered
-    { maximum_roll = 58, preset = 3 }, -- VFR Broken
-    { maximum_roll = 72, preset = 4 }, -- VFR Marginal
-    { maximum_roll = 83, preset = 5 }, -- IFR Non-precision
-    { maximum_roll = 91, preset = 6 }, -- IFR Precision
-    { maximum_roll = 97, preset = 7 }, -- Convective
-    { maximum_roll = 100, preset = 8 } -- Large-cell Storms
-}
 local WEATHER_CHANGE_MODE_IMPROVING = 1
 local WEATHER_CHANGE_MODE_DETERIORATING = 5
+local WEATHER_CHANGE_MODE_LIVE = 7
+local WEATHER_CHANGE_MODE_DATAREF = "sim/weather/region/change_mode"
 
 local STOPPED_SPEED_MPS = 1.0
 local MAX_AIRPORT_DISTANCE_KM = 5.0
@@ -324,19 +314,13 @@ dataref(
     "readonly"
 )
 
--- X-Plane 12 regional weather controls. The preset is selected only when a
--- profile becomes active; subsequent changes use X-Plane's native evolution
--- rather than repeatedly replacing the entire atmosphere.
-dataref(
-    "xoof_weather_preset",
-    "sim/weather/region/weather_preset",
-    "writable"
-)
-
+-- Read the regional change mode continuously, but write it only at deliberate
+-- campaign trend events. A persistent writable preset binding can repeatedly
+-- reapply an entire atmosphere, so X2030 never binds or changes the preset.
 dataref(
     "xoof_weather_change_mode",
-    "sim/weather/region/change_mode",
-    "writable"
+    WEATHER_CHANGE_MODE_DATAREF,
+    "readonly"
 )
 
 -- X-Plane publishes the configured aircraft fuel capacity in pounds.
@@ -2488,35 +2472,33 @@ end
 -- CAMPAIGN WEATHER
 ------------------------------------------------------------
 
-local function choose_weighted_weather_preset()
-    local preset_roll = math.random(1, 100)
-
-    for _, preset_entry in ipairs(WEATHER_PRESET_ROLLS) do
-        if preset_roll <= preset_entry.maximum_roll then
-            return preset_entry.preset
-        end
+local function choose_weather_trend()
+    -- Real weather owns its evolution. Do not compete with X-Plane or an
+    -- external weather provider when that mode is active.
+    if CampaignHelpers.safe_number(xoof_weather_change_mode, nil)
+            == WEATHER_CHANGE_MODE_LIVE then
+        weather_trend_message = "LOCAL WEATHER: LIVE FEED"
+        return
     end
 
-    -- The table deliberately ends at 100, but retain a safe clear-weather
-    -- fallback so a later balancing edit cannot return nil to X-Plane.
-    return 0
-end
-
-local function choose_weather_trend()
+    local selected_change_mode = WEATHER_CHANGE_MODE_IMPROVING
     if math.random(1, 2) == 1 then
-        xoof_weather_change_mode = WEATHER_CHANGE_MODE_IMPROVING
         weather_trend_message = "LOCAL WEATHER: IMPROVING"
     else
-        xoof_weather_change_mode = WEATHER_CHANGE_MODE_DETERIORATING
+        selected_change_mode = WEATHER_CHANGE_MODE_DETERIORATING
         weather_trend_message = "LOCAL WEATHER: DETERIORATING"
     end
+
+    -- Use an explicit event-driven write instead of a persistent writable
+    -- binding, ensuring this value is sent only when a trend is selected.
+    set(WEATHER_CHANGE_MODE_DATAREF, selected_change_mode)
+    logMsg("[X2030] Campaign weather trend applied: "
+        .. weather_trend_message)
 end
 
--- Weather is deliberately session-based: each successful profile activation
--- receives a fresh preset and trend without expanding or invalidating legacy
--- campaign saves.
-local function start_campaign_weather()
-    xoof_weather_preset = choose_weighted_weather_preset()
+-- Weather trends are session-based without expanding or invalidating legacy
+-- campaign saves. Existing X-Plane conditions always remain the starting point.
+local function start_campaign_weather_trend()
     weather_trend_elapsed_seconds = 0
     weather_last_sim_time = CampaignHelpers.safe_number(
         xoof_sim_running_time, nil)
@@ -2675,7 +2657,7 @@ local function create_new_profile()
     available_save_error = nil
     profile_screen_active = false
     overwrite_confirmation_active = false
-    start_campaign_weather()
+    start_campaign_weather_trend()
     refresh_airport_suggestions()
     CampaignHelpers.set_status("Starting airport: NZMO. Select your next hop.")
     CampaignHelpers.play_optional_campaign_message(
@@ -2747,7 +2729,7 @@ local function load_existing_profile()
     get_or_create_airport_fuel(
         departure_airport, get_longest_runway_metres(departure_airport))
     profile_screen_active = false
-    start_campaign_weather()
+    start_campaign_weather_trend()
     refresh_airport_suggestions()
     CampaignHelpers.set_status("Campaign resumed at " .. departure_airport
         .. ". Select your next hop.")
